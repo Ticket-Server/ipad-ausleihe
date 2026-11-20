@@ -10,7 +10,7 @@
       "binding": "DB",
       "database_name": "ipad-ausleihe",
       // Nach dem Anlegen der D1-Datenbank hier deren ID eintragen (siehe README).
-      "database_id": "HIER-DATENBANK-ID-EINTRAGEN"
+      "database_id": "7f7082f2-01ce-4e0f-baa2-4d137e78ced7"
     }
   ],
   // Täglich um 03:17 UTC: alte Ausleihen und abgelaufene Sitzungen löschen.
