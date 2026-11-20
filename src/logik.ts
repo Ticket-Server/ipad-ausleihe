@@ -1,6 +1,6 @@
 // Fachlogik der Ausleihe. Die Routen in index.tsx rufen nur diese Funktionen auf.
 
-import { hashen, pinErzeugen, pruefen, scheinPruefung, startpasswortErzeugen } from "./krypto";
+import { hashen, mussErneuertWerden, PASSWORT_RUNDEN, PIN_RUNDEN, pinErzeugen, pruefen, scheinPruefung, startpasswortErzeugen } from "./krypto";
 import { faelligkeitBerechnen, uhrzeit } from "./zeit";
 
 export interface Einstellungen {
@@ -113,7 +113,7 @@ export async function schuelerAnlegen(db: D1Database, env: Einstellungen, kuerze
   const pin = pinErzeugen(Number(env.PIN_LAENGE) || 4);
   await db
     .prepare("INSERT INTO konten (kuerzel, rolle, klasse, geheimnis, erstellt_am) VALUES (?, 'schueler', ?, ?, ?)")
-    .bind(kuerzel, klasse.trim().slice(0, 10), await hashen(pin), Date.now())
+    .bind(kuerzel, klasse.trim().slice(0, 10), await hashen(pin, PIN_RUNDEN), Date.now())
     .run();
   return pin;
 }
@@ -122,7 +122,7 @@ export async function pinZuruecksetzen(db: D1Database, env: Einstellungen, konto
   const pin = pinErzeugen(Number(env.PIN_LAENGE) || 4);
   await db
     .prepare("UPDATE konten SET geheimnis = ?, fehlversuche = 0, gesperrt_bis = NULL WHERE id = ?")
-    .bind(await hashen(pin), konto.id)
+    .bind(await hashen(pin, PIN_RUNDEN), konto.id)
     .run();
   return pin;
 }
@@ -131,7 +131,7 @@ export async function lehrkraftAnlegen(db: D1Database, kuerzel: string, istAdmin
   const pw = passwort ?? startpasswortErzeugen();
   await db
     .prepare("INSERT INTO konten (kuerzel, rolle, ist_admin, geheimnis, erstellt_am) VALUES (?, 'lehrkraft', ?, ?, ?)")
-    .bind(kuerzel, istAdmin ? 1 : 0, await hashen(pw), Date.now())
+    .bind(kuerzel, istAdmin ? 1 : 0, await hashen(pw, PASSWORT_RUNDEN), Date.now())
     .run();
   return pw;
 }
@@ -139,7 +139,7 @@ export async function lehrkraftAnlegen(db: D1Database, kuerzel: string, istAdmin
 export async function passwortSetzen(db: D1Database, kontoId: number, passwort: string) {
   await db
     .prepare("UPDATE konten SET geheimnis = ?, fehlversuche = 0, gesperrt_bis = NULL WHERE id = ?")
-    .bind(await hashen(passwort), kontoId)
+    .bind(await hashen(passwort, PASSWORT_RUNDEN), kontoId)
     .run();
 }
 
@@ -154,8 +154,9 @@ export async function gibtEsLehrkraefte(db: D1Database) {
 export async function anmelden(db: D1Database, kuerzelRoh: string, geheimnis: string, rolle: Rolle, meldung = FALSCHE_ANMELDUNG) {
   const kuerzel = kuerzelNormalisieren(kuerzelRoh);
   const konto = kuerzel ? await kontoNachKuerzel(db, kuerzel) : null;
+  const runden = rolle === "schueler" ? PIN_RUNDEN : PASSWORT_RUNDEN;
   if (!konto || konto.rolle !== rolle) {
-    await scheinPruefung(geheimnis);
+    await scheinPruefung(geheimnis, runden);
     throw new AusleiheFehler(meldung);
   }
   const jetzt = Date.now();
@@ -177,6 +178,10 @@ export async function anmelden(db: D1Database, kuerzelRoh: string, geheimnis: st
   if (!konto.aktiv) throw new AusleiheFehler("Dieses Kürzel ist deaktiviert. Bitte wende dich an eine Lehrkraft.");
   if (konto.fehlversuche || konto.gesperrt_bis) {
     await db.prepare("UPDATE konten SET fehlversuche = 0, gesperrt_bis = NULL WHERE id = ?").bind(konto.id).run();
+  }
+  if (mussErneuertWerden(konto.geheimnis, runden)) {
+    konto.geheimnis = await hashen(geheimnis, runden);
+    await db.prepare("UPDATE konten SET geheimnis = ? WHERE id = ?").bind(konto.geheimnis, konto.id).run();
   }
   return konto;
 }

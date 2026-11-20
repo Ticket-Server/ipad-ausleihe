@@ -30,11 +30,15 @@ Danach bleibt niemand angemeldet. Der Nächste am Gerät kann also nicht im Name
 - **Geräteseite:** Wer hat das Gerät? Ausgeben oder zurückbuchen ohne PIN, Verlauf des Geräts.
 - **Geräte:** mit **„iPad-Wagen anlegen“** Wagen-Nummer und Anzahl eingeben – die Geräte werden automatisch
   angelegt: Wagen 1 mit 20 Geräten ergibt `W01-01` bis `W01-20` (ab Gerät 100 dreistellig, bis zu 500 auf einmal).
-  Erneut aufgerufen, werden weitere Geräte hinten angehängt. Filter nach Wagen, **QR-Etiketten pro Wagen drucken**,
+  Erneut aufgerufen, werden weitere Geräte hinten angehängt. Filter nach Wagen, **QR-Etiketten pro Wagen drucken** (passend für den Etikettenbogen der Schule: A4 quer, 8 × 4 Etiketten à 33,8 × 48,3 mm; angebrochene Bögen und Feinjustierung in mm möglich),
   Status ändern (verfügbar / defekt / außer Betrieb). Versehentlich angelegte Geräte lassen sich löschen,
   solange sie noch nie ausgeliehen wurden.
-- **Schüler:** einzeln anlegen oder **Liste importieren** (ein Kürzel pro Zeile, optional `;Klasse`).
-  PINs werden automatisch erzeugt und **einmalig** zum Ausdrucken angezeigt.
+- **Schüler:** einzeln anlegen oder **Liste importieren** (Kürzel aus der Schulverwaltung, eines pro Zeile,
+  optional `;Klasse`). PINs werden automatisch erzeugt. Direkt danach: **Kärtchen drucken** (Scheckkartenformat,
+  10 pro A4-Blatt, in den Schulfarben) und **Liste herunterladen** (Excel/CSV). Die PINs werden nur verschlüsselt
+  gespeichert und sind später nicht mehr lesbar. Die Seite bleibt deshalb bis „Fertig“ abrufbar, höchstens 60 Minuten.
+  Neue PIN für einzelne Schüler: Kürzel anklicken → „Neue PIN vergeben“. Für eine ganze Klasse: Schülerliste nach
+  Klasse filtern → „Neue PINs für Klasse … vergeben“.
 - **Passwort:** eigenes Passwort ändern.
 
 **Schul-Admins** verwalten zusätzlich unter **Lehrkräfte** die Konten des Kollegiums
@@ -104,7 +108,8 @@ npm test         # startet die App mit leerer Datenbank und spielt alle Abläufe
   (Art. 6 Abs. 1 lit. e DSGVO i. V. m. dem Schulgesetz des Landes). Eine Einwilligung ist nicht nötig.
   Vor dem Start mit dem/der Datenschutzbeauftragten abstimmen und ins Verzeichnis der
   Verarbeitungstätigkeiten aufnehmen.
-- **Sicherheit:** PINs und Passwörter nur als PBKDF2-Hash, Sperre nach Fehlversuchen, nur HTTPS,
+- **Sicherheit:** PINs und Passwörter nur als Hash (PBKDF2; Passwörter mit 20.000 Runden, passend zum kostenlosen
+  Cloudflare-Tarif), Sperre nach 5 Fehlversuchen, nur HTTPS,
   Lehrkräfte-Sitzungen enden beim Schließen des Browsers und spätestens nach 8 Stunden.
 - **Sichtbarkeit:** Die öffentliche Geräteseite zeigt nur „frei“ oder „ausgeliehen“, nie das Kürzel.
 - **Löschung:** Abgeschlossene Ausleihen werden nach 90 Tagen automatisch gelöscht, außer ein gemeldeter

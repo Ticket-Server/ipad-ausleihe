@@ -1,6 +1,14 @@
 // Passwörter und PINs werden nur als PBKDF2-Hash gespeichert.
+//
+// Rechenaufwand: Im kostenlosen Cloudflare-Tarif darf eine Anfrage nur ca. 10 ms CPU-Zeit verbrauchen.
+// - Lehrkräfte-Passwörter: 20.000 Runden (ca. 4 ms). Zusammen mit der Sperre nach 5 Fehlversuchen ausreichend.
+// - Schüler-PINs: 1 Runde. Eine 4-stellige PIN hat nur 10.000 Möglichkeiten, aufwendiges Hashing würde sie
+//   nicht schützen. Den Schutz liefert die Sperre nach Fehlversuchen. So bleibt auch der Import großer
+//   Schülerlisten schnell.
+// Ältere Hashes mit anderer Rundenzahl funktionieren weiter und werden bei der nächsten Anmeldung erneuert.
 
-const ITERATIONEN = 100_000; // Höchstwert, den Cloudflare Workers erlauben
+export const PASSWORT_RUNDEN = 20_000;
+export const PIN_RUNDEN = 1;
 const enc = new TextEncoder();
 
 function b64(bytes: Uint8Array) {
@@ -20,10 +28,15 @@ async function ableiten(geheimnis: string, salz: Uint8Array, iterationen: number
   return new Uint8Array(bits);
 }
 
-export async function hashen(geheimnis: string) {
+export async function hashen(geheimnis: string, runden: number) {
   const salz = crypto.getRandomValues(new Uint8Array(16));
-  const hash = await ableiten(geheimnis, salz, ITERATIONEN);
-  return `pbkdf2$${ITERATIONEN}$${b64(salz)}$${b64(hash)}`;
+  const hash = await ableiten(geheimnis, salz, runden);
+  return `pbkdf2$${runden}$${b64(salz)}$${b64(hash)}`;
+}
+
+/** Wurde der Hash mit einer anderen Rundenzahl erstellt (z. B. von einer älteren Version)? */
+export function mussErneuertWerden(gespeichert: string, runden: number) {
+  return gespeichert.split("$")[1] !== String(runden);
 }
 
 export async function pruefen(geheimnis: string, gespeichert: string) {
@@ -38,8 +51,8 @@ export async function pruefen(geheimnis: string, gespeichert: string) {
 }
 
 /** Gleich viel Rechenzeit wie eine echte Prüfung, damit man unbekannte Kürzel nicht an der Antwortzeit erkennt. */
-export async function scheinPruefung(geheimnis: string) {
-  await ableiten(geheimnis, new Uint8Array(16), ITERATIONEN);
+export async function scheinPruefung(geheimnis: string, runden: number) {
+  await ableiten(geheimnis, new Uint8Array(16), runden);
 }
 
 function zufallAus(alphabet: string, laenge: number) {

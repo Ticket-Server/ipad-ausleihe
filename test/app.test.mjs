@@ -173,14 +173,24 @@ test("Formulare von fremden Seiten werden abgelehnt (CSRF)", async () => {
   assert.equal(r.status, 403);
 });
 
-test("Import erzeugt PINs, die nur einmal angezeigt werden", async () => {
+test("Import erzeugt PINs mit Kärtchen und Excel-Liste, abrufbar bis „Fertig“", async () => {
   let r = await lehrkraft.senden("/lehrkraft/schueler/import", { zeilen: "abcd1;7b\nEfgh2\nmamu7\n\nabcd1", klasse: "7a" });
   assert.match(r.text, /abcd1/);
   assert.match(r.text, /efgh2/);
   const pin = r.text.match(/<td class="pin">(\d{4})<\/td>/)?.[1];
   assert.ok(pin, "PIN wird angezeigt");
   r = await lehrkraft.get("/lehrkraft/zugaenge");
-  assert.equal(r.ort, "/lehrkraft/schueler");
+  assert.equal(r.status, 200, "Seite bleibt bis „Fertig“ abrufbar");
+  r = await lehrkraft.get("/lehrkraft/zugaenge/kaertchen");
+  assert.equal((r.text.match(/class="karte"/g) || []).length, 2);
+  assert.match(r.text, new RegExp(`>${pin}<`));
+  r = await lehrkraft.get("/lehrkraft/zugaenge/liste.csv");
+  assert.equal(r.status, 200);
+  assert.match(r.text, /^"Kürzel";"Klasse";"PIN"\r\n/);
+  assert.match(r.text, new RegExp(`"abcd1";"7b";"${pin}"`));
+  r = await lehrkraft.senden("/lehrkraft/zugaenge/fertig", { zurueck: "/lehrkraft/schueler" });
+  assert.equal((await lehrkraft.get("/lehrkraft/zugaenge")).ort, "/lehrkraft/schueler");
+  assert.equal((await lehrkraft.get("/lehrkraft/zugaenge/liste.csv")).ort, "/lehrkraft/schueler");
   r = await lehrkraft.get("/lehrkraft/schueler?klasse=7a");
   assert.match(r.text, /efgh2/);
   assert.doesNotMatch(r.text, /abcd1/);
@@ -294,4 +304,32 @@ test("Versehentlich angelegte Geräte löschen, benutzte bleiben", async () => {
 
   r = await lehrkraft.senden("/lehrkraft/geraete/wagen/4/loeschen", {});
   assert.match(r.text, /120 unbenutzte Geräte gelöscht/);
+});
+
+test("Etikettenbogen 8 × 4: angebrochener Bogen und Verschiebung", async () => {
+  await lehrkraft.senden("/lehrkraft/geraete/wagen", { wagen: "5", anzahl: "30" });
+  let r = await lehrkraft.get("/lehrkraft/geraete/etiketten?wagen=5&start=5&dx=1,5&dy=-2");
+  assert.match(r.text, /30 Etiketten auf 2 Bogen/);
+  assert.equal((r.text.match(/class="feld leer"/g) || []).length, 5);
+  assert.equal((r.text.match(/class="feld"/g) || []).length, 30);
+  assert.match(r.text, /left:14\.77mm;top:6\.42mm/);
+  assert.match(r.text, /name="wagen" value="5"/, "Filter bleibt beim Aktualisieren erhalten");
+  r = await lehrkraft.get("/lehrkraft/geraete/etiketten?wagen=5&start=99");
+  assert.match(r.text, /name="start"[^>]*value="31"/, "Start wird auf 31 begrenzt");
+  await lehrkraft.senden("/lehrkraft/geraete/wagen/5/loeschen", {});
+});
+
+test("Neue PINs für eine ganze Klasse, alte PINs gelten nicht mehr", async () => {
+  await lehrkraft.senden("/lehrkraft/schueler/import", { zeilen: "kl1\nkl2\nkl3", klasse: "9z" });
+  await lehrkraft.senden("/lehrkraft/zugaenge/fertig", {});
+  let r = await lehrkraft.get("/lehrkraft/schueler?klasse=9z");
+  assert.match(r.text, /Neue PINs für Klasse 9z/);
+  r = await lehrkraft.senden("/lehrkraft/schueler/klasse-pins", { klasse: "9z" });
+  assert.match(r.text, /Neue PINs \(3\)/);
+  const pin = r.text.match(/<td><strong>kl2<\/strong><\/td><td>9z<\/td><td class="pin">(\d{4})<\/td>/)?.[1];
+  assert.ok(pin);
+  r = await new Browser().senden("/g/W02-06", { aktion: "ausleihen", kuerzel: "kl2", pin });
+  assert.match(r.text, /ist jetzt auf kl2 ausgeliehen/);
+  r = await new Browser().senden("/g/W02-06", { aktion: "zurueckgeben", kuerzel: "kl2", pin, zustand: "ok" });
+  assert.match(r.text, /zurückgegeben/);
 });

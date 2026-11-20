@@ -4,7 +4,7 @@ import { csrf } from "hono/csrf";
 import { HTTPException } from "hono/http-exception";
 import type { HtmlEscapedString } from "hono/utils/html";
 import { renderSVG } from "uqr";
-import { hashen, pruefen, startpasswortErzeugen, tokenErzeugen, tokenHash } from "./krypto";
+import { hashen, PIN_RUNDEN, pinErzeugen, pruefen, startpasswortErzeugen, tokenErzeugen, tokenHash } from "./krypto";
 import {
   anmelden,
   aufraeumen,
@@ -55,10 +55,12 @@ import {
   GeraeteSeite,
   GeraetFormSeite,
   GeraetSeite,
+  KaertchenSeite,
   KollegiumSeite,
   type Meldung,
   type NeuerZugang,
   PasswortSeite,
+  PRO_BOGEN,
   SchuelerDetailSeite,
   SchuelerImportSeite,
   SchuelerListeSeite,
@@ -103,8 +105,37 @@ function sichererPfad(p: string | undefined) {
   return p && p.startsWith("/") && !p.startsWith("//") ? p : "/lehrkraft";
 }
 
-async function zugaengeMerken(c: C, zugaenge: NeuerZugang[]) {
-  await c.env.DB.prepare("UPDATE sitzungen SET neue_zugaenge = ? WHERE token_hash = ?").bind(JSON.stringify(zugaenge), c.get("sitzung")).run();
+/** Neue PINs/Passwörter bleiben bis „Fertig“ abrufbar, höchstens eine Stunde und nur in dieser Sitzung. */
+const ZUGAENGE_MINUTEN = 60;
+
+async function zugaengeMerken(c: C, liste: NeuerZugang[]) {
+  await c.env.DB.prepare("UPDATE sitzungen SET neue_zugaenge = ? WHERE token_hash = ?")
+    .bind(JSON.stringify({ zeit: Date.now(), liste }), c.get("sitzung"))
+    .run();
+}
+
+async function zugaengeLaden(c: C): Promise<NeuerZugang[]> {
+  const zeile = await c.env.DB.prepare("SELECT neue_zugaenge FROM sitzungen WHERE token_hash = ?")
+    .bind(c.get("sitzung"))
+    .first<{ neue_zugaenge: string | null }>();
+  if (!zeile?.neue_zugaenge) return [];
+  const daten = JSON.parse(zeile.neue_zugaenge);
+  if (Array.isArray(daten)) return daten; // Format der Vorversion
+  if (Date.now() - daten.zeit > ZUGAENGE_MINUTEN * 60_000) {
+    await zugaengeVerwerfen(c);
+    return [];
+  }
+  return daten.liste;
+}
+
+async function zugaengeVerwerfen(c: C) {
+  await c.env.DB.prepare("UPDATE sitzungen SET neue_zugaenge = NULL WHERE token_hash = ?").bind(c.get("sitzung")).run();
+}
+
+/** Ein Feld für CSV (Excel): in Anführungszeichen, ohne Formel-Anfang. */
+function csvFeld(wert: string) {
+  const sicher = /^[=+\-@\t\r]/.test(wert) ? `'${wert}` : wert;
+  return `"${sicher.replace(/"/g, '""')}"`;
 }
 
 // --- Middleware ---
@@ -467,7 +498,24 @@ app.get("/lehrkraft/geraete/etiketten", async (c) => {
     .filter((g) => !auswahl.length || auswahl.includes(g.inventarnummer))
     .filter((g) => !wagen || wagenTeile(g.inventarnummer)?.wagen === wagen)
     .map((g) => ({ nr: g.inventarnummer, svg: renderSVG(`${herkunft}/g/${g.inventarnummer}`, { ecc: "M", border: 2, pixelSize: 4 }) }));
-  return zeigen(c, <EtikettenSeite nutzer={c.get("nutzer")!} etiketten={etiketten} />);
+  const zahl = (name: string, min: number, max: number) => {
+    const n = Number((c.req.query(name) ?? "").replace(",", "."));
+    return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : 0;
+  };
+  const filter: Record<string, string[]> = {};
+  if (wagen) filter.wagen = [String(wagen)];
+  if (auswahl.length) filter.nr = auswahl;
+  return zeigen(
+    c,
+    <EtikettenSeite
+      nutzer={c.get("nutzer")!}
+      etiketten={etiketten}
+      start={Math.round(zahl("start", 0, PRO_BOGEN - 1))}
+      dx={zahl("dx", -10, 10)}
+      dy={zahl("dy", -10, 10)}
+      filter={filter}
+    />,
+  );
 });
 
 const GERAET_FELDER = ["inventarnummer", "bezeichnung", "seriennummer", "standort", "status", "bemerkung"] as const;
@@ -615,18 +663,76 @@ app.post("/lehrkraft/schueler/import", async (c) => {
 });
 
 /** Zeigt neu erzeugte PINs oder Startpasswörter genau einmal an. */
+const KEINE_ZUGAENGE =
+  "Die neuen Zugangsdaten sind nicht mehr abrufbar (nach „Fertig“ oder nach einer Stunde). Bei Bedarf PINs neu vergeben.";
+
 app.get("/lehrkraft/zugaenge", async (c) => {
-  const db = c.env.DB;
-  const zeile = await db.prepare("SELECT neue_zugaenge FROM sitzungen WHERE token_hash = ?").bind(c.get("sitzung")).first<{ neue_zugaenge: string | null }>();
-  await db.prepare("UPDATE sitzungen SET neue_zugaenge = NULL WHERE token_hash = ?").bind(c.get("sitzung")).run();
-  const zugaenge: NeuerZugang[] = zeile?.neue_zugaenge ? JSON.parse(zeile.neue_zugaenge) : [];
+  const zugaenge = await zugaengeLaden(c);
   if (!zugaenge.length) {
-    melden(c, "info", "Die Zugangsdaten wurden schon angezeigt. Bei Bedarf eine PIN oder ein Passwort neu vergeben.");
+    melden(c, "info", KEINE_ZUGAENGE);
     return c.redirect("/lehrkraft/schueler");
   }
   c.header("Cache-Control", "no-store");
   const zurueck = zugaenge[0].art === "pin" ? "/lehrkraft/schueler" : "/lehrkraft/kollegium";
-  return zeigen(c, <ZugaengeSeite nutzer={c.get("nutzer")!} zugaenge={zugaenge} zurueck={zurueck} />);
+  return zeigen(c, <ZugaengeSeite nutzer={c.get("nutzer")!} zugaenge={zugaenge} zurueck={zurueck} minuten={ZUGAENGE_MINUTEN} />);
+});
+
+app.post("/lehrkraft/zugaenge/fertig", async (c) => {
+  await zugaengeVerwerfen(c);
+  return c.redirect(sichererPfad(feld(await c.req.parseBody(), "zurueck")));
+});
+
+app.get("/lehrkraft/zugaenge/kaertchen", async (c) => {
+  const pins = (await zugaengeLaden(c)).filter((z) => z.art === "pin");
+  if (!pins.length) {
+    melden(c, "info", KEINE_ZUGAENGE);
+    return c.redirect("/lehrkraft/schueler");
+  }
+  c.header("Cache-Control", "no-store");
+  return zeigen(c, <KaertchenSeite nutzer={c.get("nutzer")!} pins={pins} />);
+});
+
+app.get("/lehrkraft/zugaenge/liste.csv", async (c) => {
+  const pins = (await zugaengeLaden(c)).filter((z) => z.art === "pin");
+  if (!pins.length) {
+    melden(c, "info", KEINE_ZUGAENGE);
+    return c.redirect("/lehrkraft/schueler");
+  }
+  const klassen = [...new Set(pins.map((p) => p.klasse).filter(Boolean))];
+  const name = `PINs-${klassen.length === 1 ? klassen[0].replace(/[^A-Za-z0-9_-]/g, "") : "Schueler"}-${new Date().toISOString().slice(0, 10)}.csv`;
+  const zeilen = [["Kürzel", "Klasse", "PIN"], ...pins.map((p) => [p.kuerzel, p.klasse, p.geheimnis])];
+  // BOM + Semikolon, damit Excel Umlaute und Spalten richtig erkennt
+  const csv = "\uFEFF" + zeilen.map((z) => z.map(csvFeld).join(";")).join("\r\n") + "\r\n";
+  return c.body(csv, 200, {
+    "Content-Type": "text/csv; charset=utf-8",
+    "Content-Disposition": `attachment; filename="${name}"`,
+    "Cache-Control": "no-store",
+  });
+});
+
+/** Neue PINs für alle (aktiven) Schüler einer Klasse, z. B. wenn die Liste verloren ging. */
+app.post("/lehrkraft/schueler/klasse-pins", async (c) => {
+  const db = c.env.DB;
+  const klasse = feld(await c.req.parseBody(), "klasse").trim();
+  const r = await db
+    .prepare("SELECT * FROM konten WHERE rolle = 'schueler' AND aktiv = 1 AND klasse = ? ORDER BY kuerzel")
+    .bind(klasse)
+    .all<Konto>();
+  if (!klasse || !r.results.length) {
+    melden(c, "fehler", "In dieser Klasse gibt es keine aktiven Schüler.");
+    return c.redirect("/lehrkraft/schueler");
+  }
+  const neu: NeuerZugang[] = [];
+  const sql = db.prepare("UPDATE konten SET geheimnis = ?, fehlversuche = 0, gesperrt_bis = NULL WHERE id = ?");
+  const schritte = [];
+  for (const s of r.results) {
+    const pin = pinErzeugen(Number(c.env.PIN_LAENGE) || 4);
+    schritte.push(sql.bind(await hashen(pin, PIN_RUNDEN), s.id));
+    neu.push({ kuerzel: s.kuerzel, klasse: s.klasse, geheimnis: pin, art: "pin" });
+  }
+  await db.batch(schritte);
+  await zugaengeMerken(c, neu);
+  return c.redirect("/lehrkraft/zugaenge");
 });
 
 async function schuelerLaden(c: C) {
@@ -757,7 +863,7 @@ app.post("/lehrkraft/kollegium/:kuerzel", async (c) => {
 app.post("/lehrkraft/demo", async (c) => {
   if (c.env.DEMO !== "1") return c.notFound();
   const db = c.env.DB;
-  const pinHash = await hashen("1234");
+  const pinHash = await hashen("1234", PIN_RUNDEN);
   const jetzt = Date.now();
   const stunde = 3_600_000;
   const schueler = [

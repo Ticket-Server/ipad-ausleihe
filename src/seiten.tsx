@@ -705,37 +705,132 @@ export const GeraetFormSeite: FC<{ nutzer: Konto; geraet: Geraet | null; werte: 
   </Seite>
 );
 
-export const EtikettenSeite: FC<{ nutzer: Konto; etiketten: { nr: string; svg: string }[] }> = ({ nutzer, etiketten }) => (
-  <Seite titel="QR-Etiketten" nutzer={nutzer}>
-    <div class="kein-druck">
-      <h1>QR-Etiketten</h1>
-      <p class="muted">
-        Ausdrucken, ausschneiden und auf die Rückseite oder Hülle der iPads kleben. Der Code führt direkt zur Seite des Geräts.
-      </p>
-      <div class="actions" style="margin-bottom:16px">
-        <button class="primary" onclick="window.print()">Drucken</button>
+// Etikettenbogen der Schule: A4 quer, 8 Spalten × 4 Zeilen, Etikett 33,8 × 48,3 mm, Raster mittig auf dem Blatt.
+export const BOGEN = { spalten: 8, zeilen: 4, breite: 33.8, hoehe: 48.3, links: 13.27, oben: 8.42 };
+export const PRO_BOGEN = BOGEN.spalten * BOGEN.zeilen;
+
+const BOGEN_CSS = `
+@page { size: A4 landscape; margin: 0; }
+.bogen-einstellungen { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.bogen-einstellungen p { margin: 0; }
+@media (max-width: 600px) { .bogen-einstellungen { grid-template-columns: 1fr; } }
+.boegen { zoom: .55; }
+.bogen { position: relative; width: 297mm; height: 210mm; background: #fff; color: #000; overflow: hidden;
+  box-shadow: 0 1px 8px rgba(0,0,0,.25); margin: 0 auto 10mm; }
+.raster { position: absolute; display: grid;
+  grid-template-columns: repeat(${BOGEN.spalten}, ${BOGEN.breite}mm); grid-template-rows: repeat(${BOGEN.zeilen}, ${BOGEN.hoehe}mm); }
+.feld { box-sizing: border-box; padding: 3mm 2mm 2.5mm; display: flex; flex-direction: column; align-items: center; text-align: center;
+  font-family: Arial, Helvetica, sans-serif; outline: .25mm dashed #c5c5c5; outline-offset: -.125mm; }
+.feld svg { width: 27mm; height: 27mm; display: block; }
+.feld .nr { font-weight: 700; font-size: 14pt; line-height: 1.1; margin-top: 2mm; letter-spacing: .02em; }
+.feld .wg { font-size: 7.5pt; color: #333; margin-top: .8mm; }
+.feld .hinweis { font-size: 6pt; color: #555; margin-top: auto; line-height: 1.2; }
+.feld.leer { background: repeating-linear-gradient(45deg, #eee 0 2mm, #fff 2mm 4mm); }
+@media print {
+  html, body { background: #fff !important; }
+  main { padding: 0 !important; margin: 0 !important; max-width: none !important; }
+  .boegen { zoom: 1; }
+  .bogen { box-shadow: none; margin: 0; break-after: page; page-break-after: always; }
+  .bogen:last-child { break-after: auto; page-break-after: auto; }
+  .feld { outline: none; }
+  .feld.leer { background: none; }
+}`;
+
+export const EtikettenSeite: FC<{
+  nutzer: Konto;
+  etiketten: { nr: string; svg: string }[];
+  start: number;
+  dx: number;
+  dy: number;
+  filter: Record<string, string[]>;
+}> = ({ nutzer, etiketten, start, dx, dy, filter }) => {
+  const felder: ({ nr: string; svg: string } | null)[] = [...Array(start).fill(null), ...etiketten];
+  const boegen: (typeof felder)[] = [];
+  for (let i = 0; i < felder.length; i += PRO_BOGEN) boegen.push(felder.slice(i, i + PRO_BOGEN));
+  const mm = (n: number) => String(n).replace(".", ",");
+  return (
+    <Seite titel="QR-Etiketten" nutzer={nutzer}>
+      <style>{raw(BOGEN_CSS)}</style>
+      <div class="kein-druck">
+        <h1>QR-Etiketten</h1>
+        <p class="muted">
+          Für den Etikettenbogen der Schule: A4 quer, {BOGEN.spalten} × {BOGEN.zeilen} = {PRO_BOGEN} Etiketten à {mm(BOGEN.breite)} × {mm(BOGEN.hoehe)} mm.{" "}
+          {etiketten.length} Etikett{etiketten.length === 1 ? "" : "en"} auf {boegen.length} Bogen.
+        </p>
+        <div class="card">
+          <form method="get" class="bogen-einstellungen">
+            {Object.entries(filter).flatMap(([name, werte]) => werte.map((w) => <input type="hidden" name={name} value={w} />))}
+            <Feld
+              name="start"
+              label="Schon benutzte Etiketten"
+              typ="number"
+              werte={{ start: String(start) }}
+              pflicht={false}
+              hilfe="Bei einem angebrochenen Bogen: so viele Felder oben links überspringen (zeilenweise gezählt)."
+              attrs={{ min: "0", max: String(PRO_BOGEN - 1) }}
+            />
+            <Feld
+              name="dx"
+              label="Verschieben nach rechts (mm)"
+              typ="number"
+              werte={{ dx: String(dx) }}
+              pflicht={false}
+              hilfe="Nur nötig, wenn der Drucker versetzt druckt. Negativ = nach links."
+              attrs={{ min: "-10", max: "10", step: "0.5" }}
+            />
+            <Feld
+              name="dy"
+              label="Verschieben nach unten (mm)"
+              typ="number"
+              werte={{ dy: String(dy) }}
+              pflicht={false}
+              hilfe="Negativ = nach oben."
+              attrs={{ min: "-10", max: "10", step: "0.5" }}
+            />
+            <div class="actions" style="margin:0">
+              <button>Vorschau aktualisieren</button>
+            </div>
+          </form>
+        </div>
+        <div class="notice">
+          <strong>Beim Drucken:</strong> Querformat, Skalierung <strong>100 % / Tatsächliche Größe</strong>, Ränder <strong>Keine</strong>,
+          Kopf- und Fußzeilen <strong>aus</strong>. Tipp: Erst auf normales Papier drucken und gegen das Licht auf einen Etikettenbogen legen.
+        </div>
+        <div class="actions" style="margin-bottom:16px">
+          <button class="primary" onclick="window.print()">Drucken</button>
+        </div>
       </div>
-    </div>
-    <div class="etiketten">
       {etiketten.length ? (
-        etiketten.map((e) => (
-          <div class="etikett">
-            {raw(e.svg)}
-            <strong>{e.nr}</strong>
-            {wagenTeile(e.nr) ? (
-              <small>
-                Wagen {wagenTeile(e.nr)!.wagen} · Gerät {wagenTeile(e.nr)!.geraet}
-              </small>
-            ) : null}
-            <small>Scannen zum Ausleihen &amp; Zurückgeben</small>
-          </div>
-        ))
+        <div class="boegen">
+          {boegen.map((bogen) => (
+            <div class="bogen">
+              <div class="raster" style={`left:${BOGEN.links + dx}mm;top:${BOGEN.oben + dy}mm`}>
+                {bogen.map((e) =>
+                  e ? (
+                    <div class="feld">
+                      {raw(e.svg)}
+                      <div class="nr">{e.nr}</div>
+                      {wagenTeile(e.nr) ? (
+                        <div class="wg">
+                          Wagen {wagenTeile(e.nr)!.wagen} · Gerät {wagenTeile(e.nr)!.geraet}
+                        </div>
+                      ) : null}
+                      <div class="hinweis">Scannen zum Ausleihen &amp; Zurückgeben</div>
+                    </div>
+                  ) : (
+                    <div class="feld leer"></div>
+                  ),
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       ) : (
         <p class="muted">Keine Geräte.</p>
       )}
-    </div>
-  </Seite>
-);
+    </Seite>
+  );
+};
 
 export const SchuelerListeSeite: FC<{
   nutzer: Konto;
@@ -788,6 +883,17 @@ export const SchuelerListeSeite: FC<{
     ) : (
       <p class="muted">Keine Schüler gefunden.</p>
     )}
+    {klasse && schueler.length ? (
+      <form
+        method="post"
+        action="/lehrkraft/schueler/klasse-pins"
+        style="margin-top:16px"
+        {...Bestaetigen(`Allen aktiven Schülern der Klasse ${klasse} eine neue PIN geben? Die alten PINs funktionieren dann nicht mehr.`)}
+      >
+        <input type="hidden" name="klasse" value={klasse} />
+        <button>Neue PINs für Klasse {klasse} vergeben (mit Kärtchen)</button>
+      </form>
+    ) : null}
   </Seite>
 );
 
@@ -848,22 +954,44 @@ export interface NeuerZugang {
   art: "pin" | "passwort";
 }
 
-export const ZugaengeSeite: FC<{ nutzer: Konto; zugaenge: NeuerZugang[]; zurueck: string }> = ({ nutzer, zugaenge, zurueck }) => {
+export const ZugaengeSeite: FC<{ nutzer: Konto; zugaenge: NeuerZugang[]; zurueck: string; minuten: number }> = ({
+  nutzer,
+  zugaenge,
+  zurueck,
+  minuten,
+}) => {
   const pins = zugaenge[0]?.art === "pin";
   return (
     <Seite titel={pins ? "Neue PINs" : "Neues Passwort"} nutzer={nutzer}>
       <div class="kein-druck">
-        <h1>{pins ? "Neue PINs" : "Startpasswort"}</h1>
+        <h1>{pins ? `Neue PINs (${zugaenge.length})` : "Startpasswort"}</h1>
         <div class="notice">
-          {pins ? "Diese PINs werden " : "Dieses Passwort wird "}
-          <strong>nur jetzt</strong> angezeigt.{" "}
-          {pins
-            ? "Bitte ausdrucken und an die Schüler verteilen, z. B. als Zettel zum Ausschneiden."
-            : "Bitte der Lehrkraft geben. Sie sollte es nach der ersten Anmeldung unter „Passwort“ ändern."}
+          {pins ? (
+            <>
+              Die PINs sind nur verschlüsselt gespeichert und später <strong>nicht mehr lesbar</strong>. Bitte jetzt Kärtchen drucken
+              und/oder die Liste herunterladen. Diese Seite bleibt abrufbar, bis du auf „Fertig“ klickst (höchstens {minuten} Minuten).
+            </>
+          ) : (
+            <>
+              Dieses Passwort wird <strong>nur jetzt</strong> angezeigt. Bitte der Lehrkraft geben. Sie sollte es nach der ersten
+              Anmeldung unter „Passwort“ ändern.
+            </>
+          )}
         </div>
         <div class="actions" style="margin-bottom:16px">
-          <button class="primary" onclick="window.print()">Drucken</button>
-          <a class="btn" href={zurueck}>Fertig</a>
+          {pins ? (
+            <>
+              <a class="btn primary" href="/lehrkraft/zugaenge/kaertchen">Kärtchen drucken</a>
+              <a class="btn" href="/lehrkraft/zugaenge/liste.csv">Liste herunterladen (Excel)</a>
+              <button onclick="window.print()">Liste drucken</button>
+            </>
+          ) : (
+            <button class="primary" onclick="window.print()">Drucken</button>
+          )}
+          <form method="post" action="/lehrkraft/zugaenge/fertig">
+            <input type="hidden" name="zurueck" value={zurueck} />
+            <button>Fertig</button>
+          </form>
         </div>
       </div>
       <div class="tabelle pins">
@@ -883,6 +1011,93 @@ export const ZugaengeSeite: FC<{ nutzer: Konto; zugaenge: NeuerZugang[]; zurueck
         </table>
       </div>
       {pins ? <p class="nur-druck">iPad-Ausleihe: QR-Code am iPad scannen, Kürzel und PIN eingeben. PIN geheim halten.</p> : null}
+    </Seite>
+  );
+};
+
+// Kärtchen im Scheckkartenformat 85 × 54 mm, 2 × 5 auf A4 hochkant, mit Schnittlinien. Farben der Schule.
+const KARTE = { breite: 85, hoehe: 54, spalten: 2, zeilen: 5 };
+const PRO_SEITE = KARTE.spalten * KARTE.zeilen;
+const KAERTCHEN_CSS = `
+@page { size: A4 portrait; margin: 0; }
+.blaetter { zoom: .6; }
+.blatt { position: relative; width: 210mm; height: 297mm; background: #fff; color: #1d2a19; overflow: hidden;
+  box-shadow: 0 1px 8px rgba(0,0,0,.25); margin: 0 auto 10mm; }
+.karten { position: absolute; left: ${(210 - KARTE.breite * KARTE.spalten) / 2}mm; top: ${(297 - KARTE.hoehe * KARTE.zeilen) / 2}mm;
+  display: grid; grid-template-columns: repeat(${KARTE.spalten}, ${KARTE.breite}mm); grid-template-rows: repeat(${KARTE.zeilen}, ${KARTE.hoehe}mm); }
+.karte { box-sizing: border-box; outline: .25mm dashed #9aa; outline-offset: -.125mm; display: flex; flex-direction: column;
+  font-family: Arial, Helvetica, sans-serif; overflow: hidden; }
+.karte .kopf { background: #457537; color: #fff; padding: 2.6mm 4mm; display: flex; justify-content: space-between; align-items: center;
+  border-bottom: 1.2mm solid #dcdc24; }
+.karte .kopf b { font-size: 11pt; display: flex; align-items: center; gap: 2mm; }
+.karte .kopf b i { display: inline-block; width: 3.2mm; height: 3.2mm; background: #dcdc24; box-shadow: .9mm 0 0 #e22813; margin-right: 1mm; }
+.karte .kopf span { font-size: 9pt; color: #dcdc24; font-weight: 700; }
+.karte .inhalt { flex: 1; display: grid; grid-template-columns: 1fr auto; gap: 1mm 4mm; padding: 3mm 4mm 0; align-content: center; }
+.karte .label { font-size: 7pt; color: #5b6657; text-transform: uppercase; letter-spacing: .06em; }
+.karte .wert { font-family: "Courier New", monospace; font-weight: 700; font-size: 17pt; line-height: 1.1; word-break: break-all; }
+.karte .pin { font-size: 20pt; letter-spacing: .18em; }
+.karte .fuss { font-size: 6.3pt; color: #5b6657; padding: 1.5mm 4mm 2.5mm; line-height: 1.3; }
+@media print {
+  html, body { background: #fff !important; }
+  main { padding: 0 !important; margin: 0 !important; max-width: none !important; }
+  .blaetter { zoom: 1; }
+  .blatt { box-shadow: none; margin: 0; break-after: page; page-break-after: always; }
+  .blatt:last-child { break-after: auto; page-break-after: auto; }
+  .karte .kopf { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}`;
+
+export const KaertchenSeite: FC<{ nutzer: Konto; pins: NeuerZugang[] }> = ({ nutzer, pins }) => {
+  const blaetter: NeuerZugang[][] = [];
+  for (let i = 0; i < pins.length; i += PRO_SEITE) blaetter.push(pins.slice(i, i + PRO_SEITE));
+  return (
+    <Seite titel="Kärtchen drucken" nutzer={nutzer}>
+      <style>{raw(KAERTCHEN_CSS)}</style>
+      <div class="kein-druck">
+        <h1>Kärtchen drucken</h1>
+        <p class="muted">
+          {pins.length} Kärtchen im Scheckkartenformat (85 × 54 mm), {PRO_SEITE} pro A4-Blatt, {blaetter.length} Blatt. Entlang der
+          gestrichelten Linien ausschneiden. Tipp: auf etwas dickeres Papier drucken oder laminieren.
+        </p>
+        <div class="notice">
+          <strong>Beim Drucken:</strong> Hochformat, Skalierung <strong>100 %</strong>, Ränder <strong>Keine</strong>,
+          <strong> Hintergrundgrafiken an</strong> (damit die grüne Kopfzeile gedruckt wird).
+        </div>
+        <div class="actions" style="margin-bottom:16px">
+          <button class="primary" onclick="window.print()">Drucken</button>
+          <a class="btn" href="/lehrkraft/zugaenge">Zurück zur Liste</a>
+        </div>
+      </div>
+      <div class="blaetter">
+        {blaetter.map((blatt) => (
+          <div class="blatt">
+            <div class="karten">
+              {blatt.map((p) => (
+                <div class="karte">
+                  <div class="kopf">
+                    <b>
+                      <i></i>iPad-Ausleihe
+                    </b>
+                    {p.klasse ? <span>Klasse {p.klasse}</span> : null}
+                  </div>
+                  <div class="inhalt">
+                    <div>
+                      <div class="label">Kürzel</div>
+                      <div class="wert">{p.kuerzel}</div>
+                    </div>
+                    <div>
+                      <div class="label">PIN</div>
+                      <div class="wert pin">{p.geheimnis}</div>
+                    </div>
+                  </div>
+                  <div class="fuss">
+                    QR-Code am iPad scannen, Kürzel + PIN eingeben. <b>PIN geheim halten!</b> Vergessen? Bei einer Lehrkraft melden.
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </Seite>
   );
 };
