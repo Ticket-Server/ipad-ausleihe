@@ -95,7 +95,7 @@ export const KUERZEL_REGEL =
 export function nummerGueltig(n: string) {
   return /^[A-Z0-9][A-Z0-9-]{0,19}$/.test(n);
 }
-export const NUMMER_REGEL = "Nur Großbuchstaben, Ziffern und Bindestrich, höchstens 20 Zeichen (z. B. IPAD-017).";
+export const NUMMER_REGEL = "Nur Großbuchstaben, Ziffern und Bindestrich, höchstens 20 Zeichen (z. B. W01-05).";
 
 export const PASSWORT_MIN = 10;
 
@@ -308,6 +308,97 @@ export async function aufraeumen(db: D1Database, env: Einstellungen, jetzt = Dat
     db.prepare("DELETE FROM sitzungen WHERE laeuft_ab < ?").bind(jetzt),
   ]);
   return alt.meta.changes ?? 0;
+}
+
+// --- iPad-Wagen ---
+
+export const MAX_WAGEN = 99;
+export const MAX_GERAETE_PRO_VORGANG = 500;
+const WAGEN_MUSTER = /^W(\d{2})-(\d{2,3})$/;
+
+/** "W01" für Wagen 1 */
+export const wagenKennung = (nr: number) => `W${String(nr).padStart(2, "0")}`;
+
+/** Zerlegt "W01-05" in Wagen 1, Gerät 5. Andere Inventarnummern ergeben null. */
+export function wagenTeile(inventarnummer: string) {
+  const m = WAGEN_MUSTER.exec(inventarnummer);
+  return m ? { wagen: Number(m[1]), geraet: Number(m[2]) } : null;
+}
+
+/** Sortiert Inventarnummern natürlich: W01-2 vor W01-10 vor W02-1. */
+export const natuerlich = (a: string, b: string) => a.localeCompare(b, "de", { numeric: true });
+
+/** Wie viele Geräte hat jeder Wagen schon, und welche Nummer ist die höchste? */
+export async function wagenBestand(db: D1Database) {
+  const r = await db
+    .prepare("SELECT inventarnummer FROM geraete WHERE inventarnummer GLOB 'W[0-9][0-9]-[0-9]*'")
+    .all<{ inventarnummer: string }>();
+  const bestand: Record<number, { anzahl: number; hoechste: number }> = {};
+  for (const { inventarnummer } of r.results) {
+    const t = wagenTeile(inventarnummer);
+    if (!t) continue;
+    const b = (bestand[t.wagen] ??= { anzahl: 0, hoechste: 0 });
+    b.anzahl++;
+    b.hoechste = Math.max(b.hoechste, t.geraet);
+  }
+  return bestand;
+}
+
+/**
+ * Legt die Geräte eines iPad-Wagens an: W01-01, W01-02, …
+ * Hat der Wagen schon Geräte, wird hinten angehängt. Ab Gerät 100 dreistellig.
+ */
+export async function wagenAnlegen(db: D1Database, wagen: number, anzahl: number, bezeichnung: string) {
+  if (!Number.isInteger(wagen) || wagen < 1 || wagen > MAX_WAGEN) {
+    throw new AusleiheFehler(`Die Wagen-Nummer muss zwischen 1 und ${MAX_WAGEN} liegen.`);
+  }
+  if (!Number.isInteger(anzahl) || anzahl < 1 || anzahl > MAX_GERAETE_PRO_VORGANG) {
+    throw new AusleiheFehler(`Bitte zwischen 1 und ${MAX_GERAETE_PRO_VORGANG} Geräte auf einmal anlegen.`);
+  }
+  const start = ((await wagenBestand(db))[wagen]?.hoechste ?? 0) + 1;
+  const ende = start + anzahl - 1;
+  if (ende > 999) throw new AusleiheFehler("Ein Wagen kann höchstens 999 Geräte haben.");
+  const kennung = wagenKennung(wagen);
+  const nummern = Array.from({ length: anzahl }, (_, i) => `${kennung}-${String(start + i).padStart(2, "0")}`);
+  const sql = db.prepare("INSERT INTO geraete (inventarnummer, bezeichnung, standort) VALUES (?, ?, ?)");
+  try {
+    await db.batch(nummern.map((nr) => sql.bind(nr, bezeichnung.trim().slice(0, 100), `Wagen ${wagen}`)));
+  } catch (e) {
+    if (String(e).includes("UNIQUE")) {
+      throw new AusleiheFehler("Einige dieser Inventarnummern gibt es schon. Bitte die Geräteliste prüfen.");
+    }
+    throw e;
+  }
+  return nummern;
+}
+
+/** Löscht ein Gerät, das noch nie ausgeliehen wurde (z. B. versehentlich angelegt). */
+export async function geraetLoeschen(db: D1Database, geraet: Geraet) {
+  const verlauf = await db.prepare("SELECT 1 FROM ausleihen WHERE geraet_id = ? LIMIT 1").bind(geraet.id).first();
+  if (verlauf) {
+    throw new AusleiheFehler(
+      `${geraet.inventarnummer} wurde schon ausgeliehen und kann deshalb nicht gelöscht werden. Stattdessen den Status „Außer Betrieb“ setzen.`,
+    );
+  }
+  await db.prepare("DELETE FROM geraete WHERE id = ?").bind(geraet.id).run();
+}
+
+/** Löscht alle Geräte eines Wagens, die noch nie ausgeliehen wurden. Gibt gelöschte und behaltene zurück. */
+export async function wagenLoeschen(db: D1Database, wagen: number) {
+  const r = await db
+    .prepare(
+      `SELECT g.id, g.inventarnummer, EXISTS (SELECT 1 FROM ausleihen a WHERE a.geraet_id = g.id) AS benutzt
+       FROM geraete g WHERE g.inventarnummer GLOB ?`,
+    )
+    .bind(`${wagenKennung(wagen)}-[0-9]*`)
+    .all<{ id: number; inventarnummer: string; benutzt: number }>();
+  const loeschen = r.results.filter((g) => !g.benutzt);
+  const behalten = r.results.filter((g) => g.benutzt).map((g) => g.inventarnummer).sort(natuerlich);
+  if (loeschen.length) {
+    const sql = db.prepare("DELETE FROM geraete WHERE id = ?");
+    await db.batch(loeschen.map((g) => sql.bind(g.id)));
+  }
+  return { geloescht: loeschen.length, behalten };
 }
 
 /** Zeilen wie "mamu7;7b" oder "mamu7" einlesen. */

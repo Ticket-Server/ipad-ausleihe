@@ -7,7 +7,7 @@ Läuft komplett bei **Cloudflare** (Workers + D1-Datenbank), ohne eigenen Server
 
 **Schüler** brauchen kein Login und keine App:
 
-1. QR-Code auf dem iPad mit der Kamera scannen (oder auf der Startseite die Inventarnummer eingeben).
+1. QR-Code auf dem iPad mit der Kamera scannen (oder auf der Startseite die Inventarnummer eingeben, z. B. `W01-05`).
 2. **Schulkürzel und PIN** eingeben und auf **Ausleihen** tippen.
 3. Zum Zurückgeben denselben Code scannen, Kürzel und PIN eingeben, Zustand angeben
    („Alles in Ordnung“, „Akku leer“, „Schaden oder Problem“) und auf **Zurückgeben** tippen.
@@ -28,7 +28,11 @@ Danach bleibt niemand angemeldet. Der Nächste am Gerät kann also nicht im Name
 
 - **Übersicht:** freie, ausgeliehene und überfällige Geräte (rot), gemeldete Schäden.
 - **Geräteseite:** Wer hat das Gerät? Ausgeben oder zurückbuchen ohne PIN, Verlauf des Geräts.
-- **Geräte:** anlegen, Status ändern (verfügbar / defekt / außer Betrieb), **QR-Etiketten drucken**.
+- **Geräte:** mit **„iPad-Wagen anlegen“** Wagen-Nummer und Anzahl eingeben – die Geräte werden automatisch
+  angelegt: Wagen 1 mit 20 Geräten ergibt `W01-01` bis `W01-20` (ab Gerät 100 dreistellig, bis zu 500 auf einmal).
+  Erneut aufgerufen, werden weitere Geräte hinten angehängt. Filter nach Wagen, **QR-Etiketten pro Wagen drucken**,
+  Status ändern (verfügbar / defekt / außer Betrieb). Versehentlich angelegte Geräte lassen sich löschen,
+  solange sie noch nie ausgeliehen wurden.
 - **Schüler:** einzeln anlegen oder **Liste importieren** (ein Kürzel pro Zeile, optional `;Klasse`).
   PINs werden automatisch erzeugt und **einmalig** zum Ausdrucken angezeigt.
 - **Passwort:** eigenes Passwort ändern.

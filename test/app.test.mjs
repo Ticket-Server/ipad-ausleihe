@@ -84,51 +84,51 @@ test("Ersteinrichtung legt den Schul-Admin an und ist danach gesperrt", async ()
 test("Demo-Daten laden", async () => {
   const r = await lehrkraft.senden("/lehrkraft/demo", {});
   assert.match(r.text, /Demo-Daten geladen/);
-  assert.match(r.text, /IPAD-010/);
+  assert.match(r.text, /W02-02/);
 });
 
 test("Schüler leiht aus und gibt zurück, ohne angemeldet zu bleiben", async () => {
   const s = new Browser();
-  let r = await s.senden("/g/IPAD-003", { aktion: "ausleihen", kuerzel: "AnWe3 ", pin: "1234" });
-  assert.match(r.text, /IPAD-003 ist jetzt auf anwe3 ausgeliehen/);
+  let r = await s.senden("/g/W01-03", { aktion: "ausleihen", kuerzel: "AnWe3 ", pin: "1234" });
+  assert.match(r.text, /W01-03 ist jetzt auf anwe3 ausgeliehen/);
   assert.ok(!s.cookies.has("sitzung"));
 
-  r = await new Browser().get("/g/IPAD-003");
+  r = await new Browser().get("/g/W01-03");
   assert.match(r.text, /Ausgeliehen/);
   assert.doesNotMatch(r.text, /anwe3/, "Öffentliche Seite darf das Kürzel nicht zeigen");
 
-  r = await s.senden("/g/IPAD-003", { aktion: "zurueckgeben", kuerzel: "anwe3", pin: "1234", zustand: "ok" });
-  assert.match(r.text, /IPAD-003 ist zurückgegeben/);
+  r = await s.senden("/g/W01-03", { aktion: "zurueckgeben", kuerzel: "anwe3", pin: "1234", zustand: "ok" });
+  assert.match(r.text, /W01-03 ist zurückgegeben/);
 });
 
 test("Gerät nicht doppelt, nur ein Gerät pro Schüler, nur eigenes Gerät zurückgeben", async () => {
   const s = new Browser();
-  let r = await s.post("/g/IPAD-001", { aktion: "ausleihen", kuerzel: "tiro2", pin: "1234" });
+  let r = await s.post("/g/W01-01", { aktion: "ausleihen", kuerzel: "tiro2", pin: "1234" });
   assert.equal(r.status, 400);
   assert.match(r.text, /schon ausgeliehen/);
 
-  r = await s.post("/g/IPAD-006", { aktion: "ausleihen", kuerzel: "mamu7", pin: "1234" });
+  r = await s.post("/g/W01-06", { aktion: "ausleihen", kuerzel: "mamu7", pin: "1234" });
   assert.equal(r.status, 400);
-  assert.match(r.text, /schon ein Gerät ausgeliehen \(IPAD-001\)/);
+  assert.match(r.text, /schon ein Gerät ausgeliehen \(W01-01\)/);
 
-  r = await s.post("/g/IPAD-001", { aktion: "zurueckgeben", kuerzel: "tiro2", pin: "1234", zustand: "ok" });
+  r = await s.post("/g/W01-01", { aktion: "zurueckgeben", kuerzel: "tiro2", pin: "1234", zustand: "ok" });
   assert.match(r.text, /nicht auf dein Kürzel ausgeliehen/);
 });
 
 test("Defektes Gerät ist nicht ausleihbar", async () => {
-  const r = await new Browser().get("/g/IPAD-005");
+  const r = await new Browser().get("/g/W01-05");
   assert.match(r.text, /Nicht ausleihbar/);
-  const r2 = await new Browser().post("/g/IPAD-005", { aktion: "ausleihen", kuerzel: "tiro2", pin: "1234" });
+  const r2 = await new Browser().post("/g/W01-05", { aktion: "ausleihen", kuerzel: "tiro2", pin: "1234" });
   assert.match(r2.text, /kann gerade nicht ausgeliehen werden/);
 });
 
 test("Schaden braucht Beschreibung und sperrt das Gerät", async () => {
   const s = new Browser();
-  await s.senden("/g/IPAD-007", { aktion: "ausleihen", kuerzel: "nihu4", pin: "1234" });
-  let r = await s.post("/g/IPAD-007", { aktion: "zurueckgeben", kuerzel: "nihu4", pin: "1234", zustand: "schaden", bemerkung: "" });
+  await s.senden("/g/W01-07", { aktion: "ausleihen", kuerzel: "nihu4", pin: "1234" });
+  let r = await s.post("/g/W01-07", { aktion: "zurueckgeben", kuerzel: "nihu4", pin: "1234", zustand: "schaden", bemerkung: "" });
   assert.equal(r.status, 400);
   assert.match(r.text, /beschreibe kurz/);
-  r = await s.senden("/g/IPAD-007", { aktion: "zurueckgeben", kuerzel: "nihu4", pin: "1234", zustand: "schaden", bemerkung: "Ladebuchse wackelt" });
+  r = await s.senden("/g/W01-07", { aktion: "zurueckgeben", kuerzel: "nihu4", pin: "1234", zustand: "schaden", bemerkung: "Ladebuchse wackelt" });
   assert.match(r.text, /Schaden ist gemeldet/);
   assert.match(r.text, /Nicht ausleihbar/);
   r = await lehrkraft.get("/lehrkraft");
@@ -137,23 +137,23 @@ test("Schaden braucht Beschreibung und sperrt das Gerät", async () => {
 
 test("Falsche PIN: gleiche Meldung wie unbekanntes Kürzel, Sperre nach 5 Versuchen", async () => {
   const s = new Browser();
-  let r = await s.post("/g/IPAD-008", { aktion: "ausleihen", kuerzel: "gibtsnicht", pin: "1234" });
+  let r = await s.post("/g/W01-08", { aktion: "ausleihen", kuerzel: "gibtsnicht", pin: "1234" });
   assert.match(r.text, /Kürzel oder PIN ist falsch/);
   for (let i = 0; i < 5; i++) {
-    r = await s.post("/g/IPAD-008", { aktion: "ausleihen", kuerzel: "tiro2", pin: "0000" });
+    r = await s.post("/g/W01-08", { aktion: "ausleihen", kuerzel: "tiro2", pin: "0000" });
     assert.match(r.text, /Kürzel oder PIN ist falsch/);
   }
-  r = await s.post("/g/IPAD-008", { aktion: "ausleihen", kuerzel: "tiro2", pin: "1234" });
+  r = await s.post("/g/W01-08", { aktion: "ausleihen", kuerzel: "tiro2", pin: "1234" });
   assert.match(r.text, /Zu viele Fehlversuche/);
   r = await lehrkraft.senden("/lehrkraft/schueler/tiro2", { aktion: "entsperren" });
   assert.match(r.text, /tiro2 ist entsperrt/);
-  r = await s.senden("/g/IPAD-008", { aktion: "ausleihen", kuerzel: "tiro2", pin: "1234" });
+  r = await s.senden("/g/W01-08", { aktion: "ausleihen", kuerzel: "tiro2", pin: "1234" });
   assert.match(r.text, /ist jetzt auf tiro2 ausgeliehen/);
 });
 
 test("Lehrkraft-Aktionen nur für Lehrkräfte, Schüler kann sich nicht als Lehrkraft anmelden", async () => {
   const s = new Browser();
-  assert.equal((await s.post("/g/IPAD-011", { aktion: "lk_ausgeben", kuerzel: "joka2" })).status, 403);
+  assert.equal((await s.post("/g/W02-03", { aktion: "lk_ausgeben", kuerzel: "joka2" })).status, 403);
   assert.match((await s.get("/lehrkraft")).ort, /^\/anmelden/);
   const r = await s.post("/anmelden", { kuerzel: "joka2", passwort: "1234", weiter: "/lehrkraft" });
   assert.equal(r.status, 400);
@@ -161,15 +161,15 @@ test("Lehrkraft-Aktionen nur für Lehrkräfte, Schüler kann sich nicht als Lehr
 });
 
 test("Lehrkraft gibt ohne PIN aus und sieht das Kürzel", async () => {
-  let r = await lehrkraft.senden("/g/IPAD-011", { aktion: "lk_ausgeben", kuerzel: "joka2" });
-  assert.match(r.text, /IPAD-011 an joka2 ausgegeben/);
+  let r = await lehrkraft.senden("/g/W02-03", { aktion: "lk_ausgeben", kuerzel: "joka2" });
+  assert.match(r.text, /W02-03 an joka2 ausgegeben/);
   assert.match(r.text, /durch admin/);
-  r = await lehrkraft.senden("/g/IPAD-011", { aktion: "lk_zurueckbuchen", zustand: "ok", weiter: "uebersicht" });
-  assert.match(r.text, /IPAD-011 ist zurückgebucht/);
+  r = await lehrkraft.senden("/g/W02-03", { aktion: "lk_zurueckbuchen", zustand: "ok", weiter: "uebersicht" });
+  assert.match(r.text, /W02-03 ist zurückgebucht/);
 });
 
 test("Formulare von fremden Seiten werden abgelehnt (CSRF)", async () => {
-  const r = await lehrkraft.post("/g/IPAD-012", { aktion: "lk_ausgeben", kuerzel: "joka2" }, { origin: "https://boese.example" });
+  const r = await lehrkraft.post("/g/W02-04", { aktion: "lk_ausgeben", kuerzel: "joka2" }, { origin: "https://boese.example" });
   assert.equal(r.status, 403);
 });
 
@@ -184,7 +184,7 @@ test("Import erzeugt PINs, die nur einmal angezeigt werden", async () => {
   r = await lehrkraft.get("/lehrkraft/schueler?klasse=7a");
   assert.match(r.text, /efgh2/);
   assert.doesNotMatch(r.text, /abcd1/);
-  r = await new Browser().senden("/g/IPAD-012", { aktion: "ausleihen", kuerzel: "abcd1", pin });
+  r = await new Browser().senden("/g/W02-04", { aktion: "ausleihen", kuerzel: "abcd1", pin });
   assert.match(r.text, /ist jetzt auf abcd1 ausgeliehen/);
 
   r = await lehrkraft.post("/lehrkraft/schueler/import", { zeilen: "gut1\nMax Müller" });
@@ -198,16 +198,16 @@ test("Schüler mit offener Ausleihe kann nicht gelöscht werden", async () => {
 });
 
 test("QR-Etiketten enthalten den Link zum Gerät", async () => {
-  const r = await lehrkraft.get("/lehrkraft/geraete/etiketten?nr=IPAD-001");
+  const r = await lehrkraft.get("/lehrkraft/geraete/etiketten?nr=W01-01");
   assert.match(r.text, /<svg/);
-  assert.match(r.text, /IPAD-001/);
-  assert.doesNotMatch(r.text, /IPAD-002/);
+  assert.match(r.text, /W01-01/);
+  assert.doesNotMatch(r.text, /W01-02/);
 });
 
 test("Kleinschreibung leitet um, unbekanntes Gerät gibt 404", async () => {
-  assert.equal((await new Browser().get("/g/ipad-001")).ort, "/g/IPAD-001");
+  assert.equal((await new Browser().get("/g/w01-01")).ort, "/g/W01-01");
   assert.equal((await new Browser().get("/g/IPAD-999")).status, 404);
-  assert.equal((await new Browser().get("/?nr=ipad-002")).ort, "/g/IPAD-002");
+  assert.equal((await new Browser().get("/?nr=w01-02")).ort, "/g/W01-02");
 });
 
 test("Schul-Admin legt Lehrkraft an, die sich mit dem Startpasswort anmeldet", async () => {
@@ -229,7 +229,7 @@ test("Alle Lehrkräfte-Seiten laden", async () => {
     "/lehrkraft",
     "/lehrkraft/geraete",
     "/lehrkraft/geraete/neu",
-    "/lehrkraft/geraete/IPAD-001",
+    "/lehrkraft/geraete/W01-01",
     "/lehrkraft/schueler",
     "/lehrkraft/schueler/neu",
     "/lehrkraft/schueler/import",
@@ -246,4 +246,52 @@ test("Gerät anlegen und doppelte Inventarnummer ablehnen", async () => {
   assert.match(r.text, /IPAD-100 gespeichert/);
   r = await lehrkraft.post("/lehrkraft/geraete/neu", { inventarnummer: "IPAD-100", status: "verfuegbar" });
   assert.match(r.text, /gibt es schon/);
+});
+
+test("iPad-Wagen: 25 Geräte auf einmal anlegen, ergänzen, Etiketten und Filter", async () => {
+  let r = await lehrkraft.get("/lehrkraft/geraete/wagen");
+  assert.equal(r.status, 200);
+  assert.match(r.text, /name="wagen"[^>]*value="3"/, "schlägt den nächsten freien Wagen vor");
+
+  r = await lehrkraft.senden("/lehrkraft/geraete/wagen", { wagen: "3", anzahl: "25", bezeichnung: "iPad 10. Gen." });
+  assert.match(r.text, /Wagen 3: 25 Geräte angelegt \(W03-01 bis W03-25\)/);
+  assert.match(r.text, /W03-09/);
+  assert.doesNotMatch(r.text, /W01-01/, "Filter zeigt nur Wagen 3");
+
+  r = await lehrkraft.senden("/lehrkraft/geraete/wagen", { wagen: "3", anzahl: "5" });
+  assert.match(r.text, /5 Geräte angelegt \(W03-26 bis W03-30\)/);
+
+  // natürliche Sortierung: W03-02 vor W03-10
+  assert.ok(r.text.indexOf(">W03-02<") < r.text.indexOf(">W03-10<"));
+
+  r = await lehrkraft.get("/lehrkraft/geraete/etiketten?wagen=3");
+  assert.equal((r.text.match(/<svg/g) || []).length, 30);
+  assert.match(r.text, /Wagen 3 · Gerät 30/);
+
+  r = await new Browser().senden("/g/W03-30", { aktion: "ausleihen", kuerzel: "emko1", pin: "1234" });
+  assert.match(r.text, /W03-30 ist jetzt auf emko1 ausgeliehen/);
+});
+
+test("iPad-Wagen: Grenzen und Fehleingaben", async () => {
+  let r = await lehrkraft.post("/lehrkraft/geraete/wagen", { wagen: "0", anzahl: "5" });
+  assert.equal(r.status, 400);
+  assert.match(r.text, /zwischen 1 und 99/);
+  r = await lehrkraft.post("/lehrkraft/geraete/wagen", { wagen: "4", anzahl: "501" });
+  assert.match(r.text, /zwischen 1 und 500/);
+  r = await lehrkraft.senden("/lehrkraft/geraete/wagen", { wagen: "4", anzahl: "120" });
+  assert.match(r.text, /120 Geräte angelegt \(W04-01 bis W04-120\)/);
+});
+
+test("Versehentlich angelegte Geräte löschen, benutzte bleiben", async () => {
+  let r = await lehrkraft.senden("/lehrkraft/geraete/W03-29/loeschen", {});
+  assert.match(r.text, /W03-29 ist gelöscht/);
+  r = await lehrkraft.senden("/lehrkraft/geraete/W03-30/loeschen", {});
+  assert.match(r.text, /schon ausgeliehen und kann deshalb nicht gelöscht werden/);
+
+  r = await lehrkraft.senden("/lehrkraft/geraete/wagen/3/loeschen", {});
+  assert.match(r.text, /28 unbenutzte Geräte gelöscht/);
+  assert.match(r.text, /Behalten, weil schon ausgeliehen: W03-30/);
+
+  r = await lehrkraft.senden("/lehrkraft/geraete/wagen/4/loeschen", {});
+  assert.match(r.text, /120 unbenutzte Geräte gelöscht/);
 });

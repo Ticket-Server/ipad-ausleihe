@@ -14,6 +14,7 @@ import {
   type Einstellungen,
   type Geraet,
   type GeraetStatus,
+  geraetLoeschen,
   geraetNachNummer,
   gibtEsLehrkraefte,
   importZeilenLesen,
@@ -23,6 +24,7 @@ import {
   kuerzelGueltig,
   kuerzelNormalisieren,
   lehrkraftAnlegen,
+  natuerlich,
   NUMMER_REGEL,
   nummerGueltig,
   nummerNormalisieren,
@@ -34,6 +36,11 @@ import {
   schuelerAnlegen,
   schuelerLoeschen,
   STATUS_TEXT,
+  wagenAnlegen,
+  wagenBestand,
+  wagenKennung,
+  wagenLoeschen,
+  wagenTeile,
   type Zustand,
   ZUSTAND_TEXT,
   zurueckgeben,
@@ -58,6 +65,7 @@ import {
   SchuelerNeuSeite,
   StartSeite,
   UebersichtSeite,
+  WagenSeite,
   type Werte,
   ZugaengeSeite,
 } from "./seiten";
@@ -388,20 +396,76 @@ app.post("/lehrkraft/schaden/:id/erledigt", async (c) => {
 
 // --- Lehrkräfte: Geräte ---
 
+function wagenAusAnfrage(c: C) {
+  const w = Number(c.req.query("wagen"));
+  return Number.isInteger(w) && w >= 1 && w <= 99 ? w : null;
+}
+
 app.get("/lehrkraft/geraete", async (c) => {
+  const wagen = wagenAusAnfrage(c);
   const r = await c.env.DB.prepare(
     `SELECT g.*, EXISTS (SELECT 1 FROM ausleihen a WHERE a.geraet_id = g.id AND a.zurueckgegeben_am IS NULL) AS ausgeliehen
-     FROM geraete g ORDER BY g.inventarnummer`,
-  ).all<Geraet & { ausgeliehen: number }>();
-  return zeigen(c, <GeraeteSeite nutzer={c.get("nutzer")!} meldungen={c.get("meldungen")} geraete={r.results} />);
+     FROM geraete g ${wagen ? "WHERE g.inventarnummer GLOB ?" : ""}`,
+  )
+    .bind(...(wagen ? [`${wagenKennung(wagen)}-[0-9]*`] : []))
+    .all<Geraet & { ausgeliehen: number }>();
+  const geraete = r.results.sort((a, b) => natuerlich(a.inventarnummer, b.inventarnummer));
+  const wagenListe = Object.keys(await wagenBestand(c.env.DB)).map(Number).sort((a, b) => a - b);
+  return zeigen(
+    c,
+    <GeraeteSeite nutzer={c.get("nutzer")!} meldungen={c.get("meldungen")} geraete={geraete} wagenListe={wagenListe} wagen={wagen} />,
+  );
+});
+
+// --- iPad-Wagen: viele Geräte auf einmal anlegen ---
+
+app.get("/lehrkraft/geraete/wagen", async (c) => {
+  const wagen = wagenAusAnfrage(c);
+  const bestand = await wagenBestand(c.env.DB);
+  const vorschlag = wagen ?? (Math.max(0, ...Object.keys(bestand).map(Number)) + 1);
+  return zeigen(
+    c,
+    <WagenSeite nutzer={c.get("nutzer")!} werte={{ wagen: String(Math.min(vorschlag, 99)), anzahl: wagen ? "1" : "20" }} bestand={bestand} />,
+  );
+});
+
+app.post("/lehrkraft/geraete/wagen", async (c) => {
+  const db = c.env.DB;
+  const body = await c.req.parseBody();
+  const werte = { wagen: feld(body, "wagen").trim(), anzahl: feld(body, "anzahl").trim(), bezeichnung: feld(body, "bezeichnung") };
+  const wagen = Number(werte.wagen);
+  try {
+    const nummern = await wagenAnlegen(db, wagen, Number(werte.anzahl), werte.bezeichnung);
+    const bereich = nummern.length > 1 ? `${nummern[0]} bis ${nummern[nummern.length - 1]}` : nummern[0];
+    melden(c, "ok", `Wagen ${wagen}: ${nummern.length} Gerät${nummern.length === 1 ? "" : "e"} angelegt (${bereich}). Jetzt die QR-Etiketten drucken.`);
+    return c.redirect(`/lehrkraft/geraete?wagen=${wagen}`);
+  } catch (e) {
+    if (!(e instanceof AusleiheFehler)) throw e;
+    return zeigen(c, <WagenSeite nutzer={c.get("nutzer")!} werte={werte} fehler={e.message} bestand={await wagenBestand(db)} />, 400);
+  }
+});
+
+app.post("/lehrkraft/geraete/wagen/:wagen/loeschen", async (c) => {
+  const wagen = Number(c.req.param("wagen"));
+  if (!Number.isInteger(wagen) || wagen < 1 || wagen > 99) return c.notFound();
+  const { geloescht, behalten } = await wagenLoeschen(c.env.DB, wagen);
+  melden(c, "ok", `Wagen ${wagen}: ${geloescht} unbenutzte${geloescht === 1 ? "s" : ""} Gerät${geloescht === 1 ? "" : "e"} gelöscht.`);
+  if (behalten.length) {
+    melden(c, "info", `Behalten, weil schon ausgeliehen: ${behalten.join(", ")}. Diese bei Bedarf auf „Außer Betrieb“ setzen.`);
+    return c.redirect(`/lehrkraft/geraete?wagen=${wagen}`);
+  }
+  return c.redirect("/lehrkraft/geraete");
 });
 
 app.get("/lehrkraft/geraete/etiketten", async (c) => {
   const auswahl = c.req.queries("nr")?.map(nummerNormalisieren).filter(Boolean) ?? [];
-  const r = await c.env.DB.prepare("SELECT inventarnummer FROM geraete ORDER BY inventarnummer").all<{ inventarnummer: string }>();
+  const wagen = wagenAusAnfrage(c);
+  const r = await c.env.DB.prepare("SELECT inventarnummer FROM geraete").all<{ inventarnummer: string }>();
   const herkunft = new URL(c.req.url).origin;
   const etiketten = r.results
+    .sort((a, b) => natuerlich(a.inventarnummer, b.inventarnummer))
     .filter((g) => !auswahl.length || auswahl.includes(g.inventarnummer))
+    .filter((g) => !wagen || wagenTeile(g.inventarnummer)?.wagen === wagen)
     .map((g) => ({ nr: g.inventarnummer, svg: renderSVG(`${herkunft}/g/${g.inventarnummer}`, { ecc: "M", border: 2, pixelSize: 4 }) }));
   return zeigen(c, <EtikettenSeite nutzer={c.get("nutzer")!} etiketten={etiketten} />);
 });
@@ -441,11 +505,26 @@ async function geraetSpeichern(c: C, geraet: Geraet | null) {
 app.get("/lehrkraft/geraete/neu", (c) => zeigen(c, <GeraetFormSeite nutzer={c.get("nutzer")!} geraet={null} werte={{}} fehler={{}} />));
 app.post("/lehrkraft/geraete/neu", (c) => geraetSpeichern(c, null));
 
+app.post("/lehrkraft/geraete/:nr/loeschen", async (c) => {
+  const g = await geraetNachNummer(c.env.DB, nummerNormalisieren(c.req.param("nr")));
+  if (!g) return c.notFound();
+  try {
+    await geraetLoeschen(c.env.DB, g);
+  } catch (e) {
+    if (!(e instanceof AusleiheFehler)) throw e;
+    melden(c, "fehler", e.message);
+    return c.redirect(`/lehrkraft/geraete/${g.inventarnummer}`);
+  }
+  melden(c, "ok", `${g.inventarnummer} ist gelöscht.`);
+  const w = wagenTeile(g.inventarnummer);
+  return c.redirect(w ? `/lehrkraft/geraete?wagen=${w.wagen}` : "/lehrkraft/geraete");
+});
+
 app.get("/lehrkraft/geraete/:nr", async (c) => {
   const g = await geraetNachNummer(c.env.DB, nummerNormalisieren(c.req.param("nr")));
   if (!g) return c.notFound();
   const werte = Object.fromEntries(GERAET_FELDER.map((f) => [f, String(g[f] ?? "")]));
-  return zeigen(c, <GeraetFormSeite nutzer={c.get("nutzer")!} geraet={g} werte={werte} fehler={{}} />);
+  return zeigen(c, <GeraetFormSeite nutzer={c.get("nutzer")!} geraet={g} werte={werte} fehler={{}} meldungen={c.get("meldungen")} />);
 });
 app.post("/lehrkraft/geraete/:nr", async (c) => {
   const g = await geraetNachNummer(c.env.DB, nummerNormalisieren(c.req.param("nr")));
@@ -693,11 +772,11 @@ app.post("/lehrkraft/demo", async (c) => {
       db.prepare("INSERT INTO konten (kuerzel, rolle, klasse, geheimnis, erstellt_am) VALUES (?, 'schueler', ?, ?, ?)").bind(k, kl, pinHash, jetzt),
     ),
     ...Array.from({ length: 16 }, (_, i) => {
-      const nr = `IPAD-${String(i + 1).padStart(3, "0")}`;
-      const status = nr === "IPAD-016" ? "ausser_betrieb" : nr === "IPAD-005" ? "defekt" : "verfuegbar";
+      const nr = i < 8 ? `W01-${String(i + 1).padStart(2, "0")}` : `W02-${String(i - 7).padStart(2, "0")}`;
+      const status = nr === "W02-08" ? "ausser_betrieb" : nr === "W01-05" ? "defekt" : "verfuegbar";
       return db
         .prepare("INSERT INTO geraete (inventarnummer, bezeichnung, seriennummer, standort, status, bemerkung) VALUES (?, 'iPad 10. Gen.', ?, ?, ?, ?)")
-        .bind(nr, `DMPX${String(i + 1).padStart(4, "0")}DEMO`, i < 8 ? "Wagen A" : "Wagen B", status, nr === "IPAD-016" ? "Akku tauschen" : "");
+        .bind(nr, `DMPX${String(i + 1).padStart(4, "0")}DEMO`, i < 8 ? "Wagen 1" : "Wagen 2", status, nr === "W02-08" ? "Akku tauschen" : "");
     }),
   ];
   const ausleihe = (nr: string, k: string, vor: number, faellig: number, zurueckVor: number | null = null, zustand = "", bemerkung = "") =>
@@ -709,13 +788,13 @@ app.post("/lehrkraft/demo", async (c) => {
       .bind(nr, k, jetzt - vor * stunde, faellig, zurueckVor === null ? null : jetzt - zurueckVor * stunde, zustand, bemerkung);
   const faellig = faelligkeitBerechnen(jetzt, c.env.RUECKGABE_UHRZEIT || "16:00");
   schritte.push(
-    ausleihe("IPAD-001", "mamu7", 1, faellig),
-    ausleihe("IPAD-002", "lesc8", 2, faellig),
-    ausleihe("IPAD-009", "fibe5", 0.5, faellig),
-    ausleihe("IPAD-010", "sola9", 26, jetzt - 20 * stunde),
-    ausleihe("IPAD-003", "joka2", 28, jetzt - 20 * stunde, 24, "ok"),
-    ausleihe("IPAD-004", "emko1", 27, jetzt - 20 * stunde, 23, "akku_leer"),
-    ausleihe("IPAD-005", "bema6", 5, jetzt, 3, "schaden", "Display hat einen Sprung unten rechts."),
+    ausleihe("W01-01", "mamu7", 1, faellig),
+    ausleihe("W01-02", "lesc8", 2, faellig),
+    ausleihe("W02-01", "fibe5", 0.5, faellig),
+    ausleihe("W02-02", "sola9", 26, jetzt - 20 * stunde),
+    ausleihe("W01-03", "joka2", 28, jetzt - 20 * stunde, 24, "ok"),
+    ausleihe("W01-04", "emko1", 27, jetzt - 20 * stunde, 23, "akku_leer"),
+    ausleihe("W01-05", "bema6", 5, jetzt, 3, "schaden", "Display hat einen Sprung unten rechts."),
   );
   await db.batch(schritte);
   melden(c, "ok", `Demo-Daten geladen. Schüler: ${schueler.map((s) => s[0]).join(", ")} – PIN für alle: 1234`);

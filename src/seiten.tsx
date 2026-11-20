@@ -6,6 +6,9 @@ import {
   type Konto,
   type Zustand,
   istGesperrt,
+  MAX_GERAETE_PRO_VORGANG,
+  MAX_WAGEN,
+  wagenTeile,
   STATUS_TEXT,
   ZUSTAND_TEXT,
 } from "./logik";
@@ -166,7 +169,7 @@ export const StartSeite: FC<{ nutzer: Konto | null; nr?: string; fehler?: string
           label="Inventarnummer"
           werte={{ nr: nr ?? "" }}
           fehler={fehler ? { nr: fehler } : {}}
-          attrs={{ placeholder: "z. B. IPAD-017", autocapitalize: "characters", autofocus: true, maxlength: "20" }}
+          attrs={{ placeholder: "z. B. W01-05", autocapitalize: "characters", autofocus: true, maxlength: "20" }}
         />
         <button class="primary gross">Weiter</button>
       </form>
@@ -510,19 +513,36 @@ export const UebersichtSeite: FC<{
   );
 };
 
-export const GeraeteSeite: FC<{ nutzer: Konto; meldungen: Meldung[]; geraete: (Geraet & { ausgeliehen: number })[] }> = ({
-  nutzer,
-  meldungen,
-  geraete,
-}) => (
+export const GeraeteSeite: FC<{
+  nutzer: Konto;
+  meldungen: Meldung[];
+  geraete: (Geraet & { ausgeliehen: number })[];
+  wagenListe: number[];
+  wagen: number | null;
+}> = ({ nutzer, meldungen, geraete, wagenListe, wagen }) => (
   <Seite titel="Geräte" nutzer={nutzer} meldungen={meldungen}>
     <div class="row">
-      <h1>Geräte</h1>
+      <h1>{wagen ? `Wagen ${wagen}` : "Geräte"}</h1>
       <div class="actions" style="margin:0">
-        <a class="btn" href="/lehrkraft/geraete/etiketten">QR-Etiketten drucken</a>
-        <a class="btn primary" href="/lehrkraft/geraete/neu">+ Gerät</a>
+        <a class="btn" href={`/lehrkraft/geraete/etiketten${wagen ? `?wagen=${wagen}` : ""}`}>
+          QR-Etiketten drucken
+        </a>
+        <a class="btn" href="/lehrkraft/geraete/neu">+ Einzelnes Gerät</a>
+        <a class="btn primary" href={`/lehrkraft/geraete/wagen${wagen ? `?wagen=${wagen}` : ""}`}>
+          {wagen ? "+ Geräte ergänzen" : "+ iPad-Wagen anlegen"}
+        </a>
       </div>
     </div>
+    {wagenListe.length ? (
+      <div class="filters">
+        <a href="/lehrkraft/geraete" class={wagen ? "" : "active"}>Alle</a>
+        {wagenListe.map((w) => (
+          <a href={`/lehrkraft/geraete?wagen=${w}`} class={w === wagen ? "active" : ""}>
+            Wagen {w}
+          </a>
+        ))}
+      </div>
+    ) : null}
     {geraete.length ? (
       <div class="tabelle">
         <table>
@@ -553,20 +573,112 @@ export const GeraeteSeite: FC<{ nutzer: Konto; meldungen: Meldung[]; geraete: (G
         </table>
       </div>
     ) : (
-      <p class="muted">Noch keine Geräte angelegt.</p>
+      <p class="muted">
+        Noch keine Geräte angelegt. Am schnellsten geht es mit <a href="/lehrkraft/geraete/wagen">iPad-Wagen anlegen</a>.
+      </p>
     )}
+    {wagen && geraete.length ? (
+      <details style="margin-top:20px">
+        <summary>Geräte dieses Wagens löschen</summary>
+        <p class="muted">
+          Löscht alle Geräte von Wagen {wagen}, die noch nie ausgeliehen wurden – z. B. wenn versehentlich zu viele angelegt wurden.
+          Geräte mit Ausleihverlauf bleiben erhalten.
+        </p>
+        <form method="post" action={`/lehrkraft/geraete/wagen/${wagen}/loeschen`} {...Bestaetigen(`Alle unbenutzten Geräte von Wagen ${wagen} löschen?`)}>
+          <button class="danger">Unbenutzte Geräte von Wagen {wagen} löschen</button>
+        </form>
+      </details>
+    ) : null}
   </Seite>
 );
 
-export const GeraetFormSeite: FC<{ nutzer: Konto; geraet: Geraet | null; werte: Werte; fehler: Fehler }> = ({ nutzer, geraet, werte, fehler }) => (
-  <Seite titel={geraet ? geraet.inventarnummer : "Neues Gerät"} nutzer={nutzer} schmal>
+export const WagenSeite: FC<{
+  nutzer: Konto;
+  werte: Werte;
+  fehler?: string;
+  bestand: Record<number, { anzahl: number; hoechste: number }>;
+}> = ({ nutzer, werte, fehler, bestand }) => (
+  <Seite titel="iPad-Wagen anlegen" nutzer={nutzer} schmal>
+    <h1>iPad-Wagen anlegen</h1>
+    {fehler ? (
+      <div class="fehler" role="alert">
+        {fehler}
+      </div>
+    ) : null}
+    <div class="card">
+      <form method="post" id="wagen-form">
+        <Feld
+          name="wagen"
+          label="Wagen-Nummer"
+          typ="number"
+          werte={werte}
+          attrs={{ min: "1", max: String(MAX_WAGEN), inputmode: "numeric", autofocus: true }}
+          hilfe="Die Nummer, die auf dem iPad-Wagen steht."
+        />
+        <Feld
+          name="anzahl"
+          label="Anzahl Geräte"
+          typ="number"
+          werte={werte}
+          attrs={{ min: "1", max: String(MAX_GERAETE_PRO_VORGANG), inputmode: "numeric" }}
+          hilfe={`Bis zu ${MAX_GERAETE_PRO_VORGANG} auf einmal.`}
+        />
+        <Feld
+          name="bezeichnung"
+          label="Gerätetyp (optional)"
+          werte={werte}
+          pflicht={false}
+          attrs={{ maxlength: "100", placeholder: "z. B. iPad 10. Gen." }}
+        />
+        <div class="notice" id="vorschau" aria-live="polite">
+          Beispiel: Wagen 1 mit 20 Geräten ergibt <strong>W01-01</strong> bis <strong>W01-20</strong>.
+        </div>
+        <div class="actions">
+          <button class="primary">Geräte anlegen</button>
+          <a class="btn" href="/lehrkraft/geraete">Abbrechen</a>
+        </div>
+      </form>
+    </div>
+    <p class="muted">
+      Hat der Wagen schon Geräte, werden die neuen hinten angehängt. Danach können die QR-Etiketten für den ganzen Wagen gedruckt werden.
+    </p>
+    {raw(`<script>
+(() => {
+  const bestand = ${JSON.stringify(bestand)};
+  const f = document.getElementById("wagen-form");
+  const v = document.getElementById("vorschau");
+  const nr = (w, g) => "W" + String(w).padStart(2, "0") + "-" + String(g).padStart(2, "0");
+  const zeigen = () => {
+    const w = parseInt(f.wagen.value, 10), n = parseInt(f.anzahl.value, 10);
+    if (!(w >= 1 && w <= ${MAX_WAGEN}) || !(n >= 1 && n <= ${MAX_GERAETE_PRO_VORGANG})) return;
+    const b = bestand[w];
+    const start = (b ? b.hoechste : 0) + 1;
+    v.innerHTML = (b ? "Wagen " + w + " hat schon " + b.anzahl + " Gerät" + (b.anzahl === 1 ? "" : "e") + ". " : "")
+      + "Es werden <strong>" + n + "</strong> Gerät" + (n === 1 ? "" : "e") + " angelegt: <strong>" + nr(w, start) + "</strong>"
+      + (n > 1 ? " bis <strong>" + nr(w, start + n - 1) + "</strong>" : "") + ".";
+  };
+  f.addEventListener("input", zeigen);
+  zeigen();
+})();
+</script>`)}
+  </Seite>
+);
+
+export const GeraetFormSeite: FC<{ nutzer: Konto; geraet: Geraet | null; werte: Werte; fehler: Fehler; meldungen?: Meldung[] }> = ({
+  nutzer,
+  geraet,
+  werte,
+  fehler,
+  meldungen = [],
+}) => (
+  <Seite titel={geraet ? geraet.inventarnummer : "Neues Gerät"} nutzer={nutzer} meldungen={meldungen} schmal>
     <h1>{geraet ? `${geraet.inventarnummer} bearbeiten` : "Neues Gerät"}</h1>
     <div class="card">
       <form method="post">
-        <Feld name="inventarnummer" label="Inventarnummer" werte={werte} fehler={fehler} hilfe="Steht auf dem Aufkleber und im QR-Code, z. B. IPAD-017." attrs={{ maxlength: "20", autocapitalize: "characters" }} />
+        <Feld name="inventarnummer" label="Inventarnummer" werte={werte} fehler={fehler} hilfe="Steht auf dem Aufkleber und im QR-Code, z. B. W01-05." attrs={{ maxlength: "20", autocapitalize: "characters" }} />
         <Feld name="bezeichnung" label="Bezeichnung" werte={werte} fehler={fehler} pflicht={false} hilfe="z. B. iPad 10. Gen." attrs={{ maxlength: "100" }} />
         <Feld name="seriennummer" label="Seriennummer" werte={werte} fehler={fehler} pflicht={false} attrs={{ maxlength: "50" }} />
-        <Feld name="standort" label="Standort" werte={werte} fehler={fehler} pflicht={false} hilfe="z. B. Wagen A oder Raum 104" attrs={{ maxlength: "50" }} />
+        <Feld name="standort" label="Standort" werte={werte} fehler={fehler} pflicht={false} hilfe="z. B. Wagen 1 oder Raum 104" attrs={{ maxlength: "50" }} />
         <p>
           <label for="f-status">Status:</label>
           <select id="f-status" name="status">
@@ -584,6 +696,12 @@ export const GeraetFormSeite: FC<{ nutzer: Konto; geraet: Geraet | null; werte: 
         </div>
       </form>
     </div>
+    {geraet ? (
+      <form method="post" action={`/lehrkraft/geraete/${geraet.inventarnummer}/loeschen`} {...Bestaetigen(`${geraet.inventarnummer} löschen?`)}>
+        <button class="danger">Gerät löschen</button>
+        <span class="muted"> Nur möglich, wenn es noch nie ausgeliehen wurde.</span>
+      </form>
+    ) : null}
   </Seite>
 );
 
@@ -604,6 +722,11 @@ export const EtikettenSeite: FC<{ nutzer: Konto; etiketten: { nr: string; svg: s
           <div class="etikett">
             {raw(e.svg)}
             <strong>{e.nr}</strong>
+            {wagenTeile(e.nr) ? (
+              <small>
+                Wagen {wagenTeile(e.nr)!.wagen} · Gerät {wagenTeile(e.nr)!.geraet}
+              </small>
+            ) : null}
             <small>Scannen zum Ausleihen &amp; Zurückgeben</small>
           </div>
         ))
