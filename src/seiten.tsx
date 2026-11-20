@@ -9,6 +9,7 @@ import {
   MAX_GERAETE_PRO_VORGANG,
   MAX_WAGEN,
   wagenTeile,
+  type WagenGeraet,
   STATUS_TEXT,
   ZUSTAND_TEXT,
 } from "./logik";
@@ -44,10 +45,16 @@ export const Seite: FC<{ titel: string; nutzer: Konto | null; meldungen?: Meldun
           <a class="brand" href="/">
             📱 iPad-Ausleihe
           </a>
+          {nutzer ? (
+            <form class="suche" method="get" action="/lehrkraft/suche" role="search">
+              <input type="search" name="q" placeholder="Kürzel oder Gerät suchen" aria-label="Kürzel oder Gerät suchen" autocomplete="off" />
+            </form>
+          ) : null}
           <nav>
             {nutzer ? (
               <>
                 <a href="/lehrkraft">Übersicht</a>
+                <a href="/lehrkraft/wagen">Wagen</a>
                 <a href="/lehrkraft/geraete">Geräte</a>
                 <a href="/lehrkraft/schueler">Schüler</a>
                 {nutzer.ist_admin ? <a href="/lehrkraft/kollegium">Lehrkräfte</a> : null}
@@ -524,6 +531,11 @@ export const GeraeteSeite: FC<{
     <div class="row">
       <h1>{wagen ? `Wagen ${wagen}` : "Geräte"}</h1>
       <div class="actions" style="margin:0">
+        {wagen ? (
+          <a class="btn" href={`/lehrkraft/wagen/${wagen}`}>
+            Wagen-Kontrolle
+          </a>
+        ) : null}
         <a class="btn" href={`/lehrkraft/geraete/etiketten${wagen ? `?wagen=${wagen}` : ""}`}>
           QR-Etiketten drucken
         </a>
@@ -589,6 +601,206 @@ export const GeraeteSeite: FC<{
         </form>
       </details>
     ) : null}
+  </Seite>
+);
+
+// --- Wagen-Kontrolle ---
+
+export interface WagenUeberblick {
+  wagen: number;
+  geraete: number;
+  ausgeliehen: number;
+  ueberfaellig: number;
+  gesperrt: number;
+}
+
+const WagenKarten: FC<{ liste: WagenUeberblick[] }> = ({ liste }) => (
+  <div class="wagen-karten">
+    {liste.map((w) => (
+      <a class={`card wagen-karte ${w.ueberfaellig ? "rot" : w.ausgeliehen ? "orange" : "gruen"}`} href={`/lehrkraft/wagen/${w.wagen}`}>
+        <strong>Wagen {w.wagen}</strong>
+        <span class="gross">
+          {w.geraete - w.ausgeliehen - w.gesperrt} / {w.geraete}
+        </span>
+        <span class="muted">im Wagen</span>
+        {w.ausgeliehen ? (
+          <span class={`badge ${w.ueberfaellig ? "danger" : "warn"}`}>
+            {w.ausgeliehen} ausgeliehen{w.ueberfaellig ? `, ${w.ueberfaellig} überfällig` : ""}
+          </span>
+        ) : (
+          <span class="badge ok">vollständig</span>
+        )}
+      </a>
+    ))}
+  </div>
+);
+
+export const WagenAuswahlSeite: FC<{ nutzer: Konto; meldungen: Meldung[]; liste: WagenUeberblick[] }> = ({ nutzer, meldungen, liste }) => (
+  <Seite titel="Wagen" nutzer={nutzer} meldungen={meldungen}>
+    <h1>Wagen-Kontrolle</h1>
+    <p class="muted">Welcher Wagen ist vollständig? Auf einen Wagen klicken, um zu sehen, welche iPads noch fehlen.</p>
+    {liste.length ? (
+      <WagenKarten liste={liste} />
+    ) : (
+      <p class="muted">
+        Noch keine iPad-Wagen angelegt. <a href="/lehrkraft/geraete/wagen">iPad-Wagen anlegen</a>
+      </p>
+    )}
+  </Seite>
+);
+
+export const WagenKontrolleSeite: FC<{
+  nutzer: Konto;
+  meldungen: Meldung[];
+  wagen: number;
+  geraete: WagenGeraet[];
+  alleWagen: number[];
+}> = ({ nutzer, meldungen, wagen, geraete, alleWagen }) => {
+  const jetzt = Date.now();
+  const offen = geraete.filter((g) => g.ausleihe_id !== null);
+  const gesperrt = geraete.filter((g) => g.ausleihe_id === null && g.status !== "verfuegbar");
+  const imWagen = geraete.length - offen.length - gesperrt.length;
+  return (
+    <Seite titel={`Wagen ${wagen}`} nutzer={nutzer} meldungen={meldungen}>
+      <div class="row">
+        <h1>Wagen {wagen}</h1>
+        <div class="actions" style="margin:0">
+          <a class="btn" href={`/lehrkraft/wagen/${wagen}`}>Aktualisieren</a>
+          <a class="btn" href={`/lehrkraft/geraete?wagen=${wagen}`}>Geräteliste</a>
+        </div>
+      </div>
+      {alleWagen.length > 1 ? (
+        <div class="filters">
+          <a href="/lehrkraft/wagen">Alle Wagen</a>
+          {alleWagen.map((w) => (
+            <a href={`/lehrkraft/wagen/${w}`} class={w === wagen ? "active" : ""}>
+              Wagen {w}
+            </a>
+          ))}
+        </div>
+      ) : null}
+
+      <div class={`wagen-stand ${offen.length ? "offen" : "komplett"}`}>
+        {offen.length ? (
+          <>
+            <strong>
+              {imWagen} von {geraete.length} iPads im Wagen
+            </strong>
+            <span>
+              {offen.length} noch ausgeliehen{gesperrt.length ? `, ${gesperrt.length} gesperrt` : ""}
+            </span>
+          </>
+        ) : (
+          <>
+            <strong>✓ Alle iPads zurückgebucht</strong>
+            <span>
+              {imWagen} von {geraete.length} im Wagen{gesperrt.length ? `, ${gesperrt.length} gesperrt (defekt / außer Betrieb)` : ""}
+            </span>
+          </>
+        )}
+      </div>
+
+      <div class="kacheln">
+        {geraete.map((g) => {
+          const ausgeliehen = g.ausleihe_id !== null;
+          const ueber = ausgeliehen && g.faellig_am! < jetzt;
+          const art = ueber ? "ueber" : ausgeliehen ? "aus" : g.status !== "verfuegbar" ? "gesperrt" : "da";
+          const nr = wagenTeile(g.inventarnummer)?.geraet ?? g.inventarnummer;
+          return (
+            <a class={`kachel ${art}`} href={`/g/${g.inventarnummer}`} title={g.inventarnummer}>
+              <span class="nr">{nr}</span>
+              <span class="zeile">
+                {ausgeliehen ? g.kuerzel : art === "gesperrt" ? STATUS_TEXT[g.status] : "im Wagen"}
+              </span>
+              <span class="zeile klein">
+                {ausgeliehen ? `${g.klasse ? `${g.klasse} · ` : ""}${ueber ? "überfällig" : `seit ${uhrzeit(g.ausgeliehen_am!)}`}` : g.inventarnummer}
+              </span>
+            </a>
+          );
+        })}
+      </div>
+      <p class="muted legende-kacheln">
+        <span class="punkt da"></span> im Wagen <span class="punkt aus"></span> ausgeliehen <span class="punkt ueber"></span> überfällig{" "}
+        <span class="punkt gesperrt"></span> defekt / außer Betrieb · Auf eine Kachel klicken für Details.
+      </p>
+
+      {offen.length ? (
+        <div class="card">
+          <h2 style="margin-top:0">Alle noch offenen zurückbuchen</h2>
+          <p class="muted">
+            Für den Fall, dass der Wagen vollständig ist, sich aber nicht alle abgemeldet haben. Die {offen.length} offenen Ausleihen werden mit
+            „Alles in Ordnung“ auf deinen Namen zurückgebucht: {offen.map((g) => g.inventarnummer).join(", ")}.
+          </p>
+          <form
+            method="post"
+            action={`/lehrkraft/wagen/${wagen}/zurueckbuchen`}
+            {...Bestaetigen(`${offen.length} iPad${offen.length === 1 ? "" : "s"} von Wagen ${wagen} zurückbuchen? Bitte vorher prüfen, dass sie wirklich im Wagen sind.`)}
+          >
+            <button class="primary">
+              {offen.length} iPad{offen.length === 1 ? "" : "s"} von Wagen {wagen} zurückbuchen
+            </button>
+          </form>
+        </div>
+      ) : null}
+    </Seite>
+  );
+};
+
+// --- Suche ---
+
+export const SuchSeite: FC<{ nutzer: Konto; begriff: string; geraete: Geraet[]; schueler: Konto[] }> = ({ nutzer, begriff, geraete, schueler }) => (
+  <Seite titel="Suche" nutzer={nutzer}>
+    <h1>Suche</h1>
+    <form class="suche-gross" method="get">
+      <input type="search" name="q" value={begriff} placeholder="Kürzel oder Gerät suchen" autofocus />
+    </form>
+    {!begriff ? (
+      <p class="muted">Kürzel (z. B. MüllerM) oder Gerätenummer (z. B. W01-05) eingeben. Ein Teil genügt.</p>
+    ) : !geraete.length && !schueler.length ? (
+      <p class="muted">Nichts gefunden für „{begriff}“.</p>
+    ) : (
+      <>
+        {schueler.length ? (
+          <>
+            <h2>Schüler</h2>
+            <div class="tabelle">
+              <table>
+                {schueler.map((s) => (
+                  <tr>
+                    <td>
+                      <a href={`/lehrkraft/schueler/${encodeURIComponent(s.kuerzel)}`}>
+                        <strong>{s.kuerzel}</strong>
+                      </a>
+                    </td>
+                    <td>{s.klasse}</td>
+                  </tr>
+                ))}
+              </table>
+            </div>
+          </>
+        ) : null}
+        {geraete.length ? (
+          <>
+            <h2>Geräte</h2>
+            <div class="tabelle">
+              <table>
+                {geraete.map((g) => (
+                  <tr>
+                    <td>
+                      <a href={`/g/${g.inventarnummer}`}>
+                        <strong>{g.inventarnummer}</strong>
+                      </a>
+                    </td>
+                    <td>{g.bezeichnung}</td>
+                    <td>{g.standort}</td>
+                  </tr>
+                ))}
+              </table>
+            </div>
+          </>
+        ) : null}
+      </>
+    )}
   </Seite>
 );
 

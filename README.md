@@ -27,6 +27,10 @@ Danach bleibt niemand angemeldet. Der Nächste am Gerät kann also nicht im Name
 **Lehrkräfte** melden sich unter „Für Lehrkräfte“ mit Kürzel und Passwort an:
 
 - **Übersicht:** freie, ausgeliehene und überfällige Geräte (rot), gemeldete Schäden.
+- **Wagen-Kontrolle** (Menü „Wagen“): pro Wagen eine Kachel je iPad – grün = im Wagen, orange = ausgeliehen
+  (mit Kürzel), rot = überfällig, grau = defekt. So sieht man am Stundenende sofort, was fehlt.
+  **Sammel-Rückbuchen:** alle noch offenen iPads eines Wagens mit einem Klick zurückbuchen, wenn der Wagen vollständig ist.
+- **Suche** oben im Kopf: Kürzel oder Gerätenummer (ein Teil genügt). Bei eindeutigem Treffer geht es direkt zum Schüler bzw. Gerät.
 - **Geräteseite:** Wer hat das Gerät? Ausgeben oder zurückbuchen ohne PIN, Verlauf des Geräts.
 - **Geräte:** mit **„iPad-Wagen anlegen“** Wagen-Nummer und Anzahl eingeben – die Geräte werden automatisch
   angelegt: Wagen 1 mit 20 Geräten ergibt `W01-01` bis `W01-20` (ab Gerät 100 dreistellig, bis zu 500 auf einmal).

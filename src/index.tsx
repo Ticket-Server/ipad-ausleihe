@@ -40,7 +40,11 @@ import {
   wagenBestand,
   wagenKennung,
   wagenLoeschen,
+  suchen,
+  wagenStatus,
   wagenTeile,
+  wagenUeberblick,
+  wagenZurueckbuchen,
   type Zustand,
   ZUSTAND_TEXT,
   zurueckgeben,
@@ -67,6 +71,9 @@ import {
   SchuelerNeuSeite,
   StartSeite,
   UebersichtSeite,
+  SuchSeite,
+  WagenAuswahlSeite,
+  WagenKontrolleSeite,
   WagenSeite,
   type Werte,
   ZugaengeSeite,
@@ -448,6 +455,54 @@ app.get("/lehrkraft/geraete", async (c) => {
   );
 });
 
+// --- Wagen-Kontrolle und Sammel-Rückbuchen ---
+
+app.get("/lehrkraft/wagen", async (c) => {
+  const liste = await wagenUeberblick(c.env.DB);
+  return zeigen(c, <WagenAuswahlSeite nutzer={c.get("nutzer")!} meldungen={c.get("meldungen")} liste={liste} />);
+});
+
+function wagenNummer(c: C) {
+  const w = Number(c.req.param("wagen"));
+  return Number.isInteger(w) && w >= 1 && w <= 99 ? w : null;
+}
+
+app.get("/lehrkraft/wagen/:wagen", async (c) => {
+  const wagen = wagenNummer(c);
+  if (!wagen) return c.notFound();
+  const geraete = await wagenStatus(c.env.DB, wagen);
+  if (!geraete.length) return c.notFound();
+  const alleWagen = (await wagenUeberblick(c.env.DB)).map((w) => w.wagen);
+  return zeigen(
+    c,
+    <WagenKontrolleSeite nutzer={c.get("nutzer")!} meldungen={c.get("meldungen")} wagen={wagen} geraete={geraete} alleWagen={alleWagen} />,
+  );
+});
+
+app.post("/lehrkraft/wagen/:wagen/zurueckbuchen", async (c) => {
+  const wagen = wagenNummer(c);
+  if (!wagen) return c.notFound();
+  const anzahl = await wagenZurueckbuchen(c.env.DB, wagen, c.get("nutzer")!);
+  melden(c, "ok", anzahl ? `Wagen ${wagen}: ${anzahl} iPad${anzahl === 1 ? "" : "s"} zurückgebucht.` : `Wagen ${wagen}: Es war nichts mehr offen.`);
+  return c.redirect(`/lehrkraft/wagen/${wagen}`);
+});
+
+// --- Suche ---
+
+app.get("/lehrkraft/suche", async (c) => {
+  const begriff = (c.req.query("q") ?? "").trim();
+  const { geraete, schueler } = await suchen(c.env.DB, begriff);
+  // Genau ein Treffer oder exakter Treffer: direkt hin
+  const exaktGeraet = geraete.find((g) => g.inventarnummer === begriff.toUpperCase());
+  const exaktSchueler = schueler.find((s) => s.kuerzel.toLowerCase() === begriff.toLowerCase());
+  if (exaktGeraet && !exaktSchueler) return c.redirect(`/g/${exaktGeraet.inventarnummer}`);
+  if (exaktSchueler && !exaktGeraet) return c.redirect(`/lehrkraft/schueler/${encodeURIComponent(exaktSchueler.kuerzel)}`);
+  if (geraete.length + schueler.length === 1) {
+    return c.redirect(geraete.length ? `/g/${geraete[0].inventarnummer}` : `/lehrkraft/schueler/${encodeURIComponent(schueler[0].kuerzel)}`);
+  }
+  return zeigen(c, <SuchSeite nutzer={c.get("nutzer")!} begriff={begriff} geraete={geraete} schueler={schueler} />);
+});
+
 // --- iPad-Wagen: viele Geräte auf einmal anlegen ---
 
 app.get("/lehrkraft/geraete/wagen", async (c) => {
@@ -592,7 +647,7 @@ app.get("/lehrkraft/schueler", async (c) => {
     params.push(klasse);
   }
   if (suche) {
-    bedingungen.push("instr(k.kuerzel, ?) > 0");
+    bedingungen.push("instr(lower(k.kuerzel), lower(?)) > 0");
     params.push(suche);
   }
   const schueler = await c.env.DB.prepare(

@@ -91,3 +91,41 @@ footer { padding-bottom: 32px; color: var(--muted); font-size: .88rem; }
   main { max-width: none; padding: 0; }
   .etiketten { grid-template-columns: repeat(4, 1fr); gap: 4mm; }
 }
+
+/* Suche im Kopf */
+.suche { flex: 1 1 180px; max-width: 260px; margin: 0; }
+.suche input { width: 100%; font: inherit; font-size: .92rem; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg); color: var(--text); }
+.suche-gross { margin-bottom: 16px; }
+.suche-gross input { width: 100%; font: inherit; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); }
+
+/* Wagen-Übersicht */
+.wagen-karten { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.wagen-karte { display: flex; flex-direction: column; gap: 2px; text-decoration: none; color: inherit; border-left: 6px solid var(--line); margin: 0; }
+.wagen-karte:hover { border-color: var(--primary); }
+.wagen-karte.gruen { border-left-color: var(--ok); }
+.wagen-karte.orange { border-left-color: var(--warn); }
+.wagen-karte.rot { border-left-color: var(--danger); }
+.wagen-karte .gross { font-size: 1.6rem; font-weight: 700; line-height: 1.2; }
+.wagen-karte .badge { align-self: flex-start; margin-top: 4px; white-space: normal; }
+
+/* Wagen-Kontrolle */
+.wagen-stand { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; padding: 12px 16px; border-radius: 10px; margin-bottom: 14px; }
+.wagen-stand strong { font-size: 1.15rem; }
+.wagen-stand.offen { background: var(--warn-bg); color: var(--warn); }
+.wagen-stand.komplett { background: var(--ok-bg); color: var(--ok); }
+.kacheln { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; }
+.kachel { display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; border-radius: 10px; border: 2px solid; text-decoration: none; color: var(--text); min-height: 84px; }
+.kachel .nr { font-size: 1.5rem; font-weight: 800; line-height: 1.1; }
+.kachel .zeile { font-size: .88rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kachel .zeile.klein { font-size: .76rem; font-weight: 400; color: var(--muted); }
+.kachel.da { background: var(--ok-bg); border-color: var(--ok); }
+.kachel.aus { background: var(--warn-bg); border-color: var(--warn); }
+.kachel.ueber { background: var(--danger-bg); border-color: var(--danger); }
+.kachel.gesperrt { background: var(--bg); border-color: var(--line); border-style: dashed; color: var(--muted); }
+.kachel:hover { outline: 2px solid var(--primary); outline-offset: 1px; }
+.legende-kacheln { margin-top: 10px; }
+.punkt { display: inline-block; width: 11px; height: 11px; border-radius: 3px; border: 2px solid; vertical-align: -1px; margin: 0 2px 0 8px; }
+.punkt.da { background: var(--ok-bg); border-color: var(--ok); }
+.punkt.aus { background: var(--warn-bg); border-color: var(--warn); }
+.punkt.ueber { background: var(--danger-bg); border-color: var(--danger); }
+.punkt.gesperrt { background: var(--bg); border-color: var(--line); border-style: dashed; }

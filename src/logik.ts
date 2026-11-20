@@ -83,14 +83,19 @@ export class AusleiheFehler extends Error {}
 
 // --- Eingaben prüfen ---
 
-export const kuerzelNormalisieren = (s: unknown) => String(s ?? "").trim().toLowerCase();
+/**
+ * Kürzel werden so gespeichert und angezeigt, wie sie eingegeben wurden (z. B. "MusterM").
+ * Beim Suchen und Anmelden spielt Groß-/Kleinschreibung keine Rolle.
+ */
+export const kuerzelNormalisieren = (s: unknown) => String(s ?? "").trim().normalize("NFC");
+const kuerzelSchluessel = (k: string) => k.toLowerCase();
 export const nummerNormalisieren = (s: unknown) => String(s ?? "").trim().toUpperCase();
 
 export function kuerzelGueltig(k: string) {
-  return /^[a-z0-9][a-z0-9._-]{1,29}$/.test(k);
+  return /^[\p{L}\p{N}][\p{L}\p{N}._-]{1,29}$/u.test(k);
 }
 export const KUERZEL_REGEL =
-  "Das Kürzel darf nur Kleinbuchstaben, Ziffern, Punkt, Bindestrich und Unterstrich enthalten (2 bis 30 Zeichen).";
+  "Das Kürzel darf Buchstaben (auch Umlaute), Ziffern, Punkt, Bindestrich und Unterstrich enthalten (2 bis 30 Zeichen), aber keine Leerzeichen.";
 
 export function nummerGueltig(n: string) {
   return /^[A-Z0-9][A-Z0-9-]{0,19}$/.test(n);
@@ -102,7 +107,7 @@ export const PASSWORT_MIN = 10;
 // --- Konten ---
 
 export function kontoNachKuerzel(db: D1Database, kuerzel: string) {
-  return db.prepare("SELECT * FROM konten WHERE kuerzel = ?").bind(kuerzel).first<Konto>();
+  return db.prepare("SELECT * FROM konten WHERE kuerzel = ? COLLATE NOCASE").bind(kuerzel).first<Konto>();
 }
 
 export function istGesperrt(k: Konto, jetzt = Date.now()) {
@@ -377,6 +382,82 @@ export async function wagenAnlegen(db: D1Database, wagen: number, anzahl: number
   return nummern;
 }
 
+export interface WagenGeraet extends Geraet {
+  ausleihe_id: number | null;
+  kuerzel: string | null;
+  klasse: string | null;
+  ausgeliehen_am: number | null;
+  faellig_am: number | null;
+}
+
+/** Alle Geräte eines Wagens mit der offenen Ausleihe (falls vorhanden), natürlich sortiert. */
+export async function wagenStatus(db: D1Database, wagen: number) {
+  const r = await db
+    .prepare(
+      `SELECT g.*, a.id AS ausleihe_id, k.kuerzel, k.klasse, a.ausgeliehen_am, a.faellig_am
+       FROM geraete g
+       LEFT JOIN ausleihen a ON a.geraet_id = g.id AND a.zurueckgegeben_am IS NULL
+       LEFT JOIN konten k ON k.id = a.schueler_id
+       WHERE g.inventarnummer GLOB ?`,
+    )
+    .bind(`${wagenKennung(wagen)}-[0-9]*`)
+    .all<WagenGeraet>();
+  return r.results.sort((a, b) => natuerlich(a.inventarnummer, b.inventarnummer));
+}
+
+/** Kurzüberblick über alle Wagen: Anzahl Geräte, ausgeliehen, überfällig. */
+export async function wagenUeberblick(db: D1Database) {
+  const r = await db
+    .prepare(
+      `SELECT g.inventarnummer, g.status, a.faellig_am
+       FROM geraete g LEFT JOIN ausleihen a ON a.geraet_id = g.id AND a.zurueckgegeben_am IS NULL
+       WHERE g.inventarnummer GLOB 'W[0-9][0-9]-[0-9]*'`,
+    )
+    .all<{ inventarnummer: string; status: GeraetStatus; faellig_am: number | null }>();
+  const jetzt = Date.now();
+  const wagen: Record<number, { geraete: number; ausgeliehen: number; ueberfaellig: number; gesperrt: number }> = {};
+  for (const z of r.results) {
+    const t = wagenTeile(z.inventarnummer);
+    if (!t) continue;
+    const w = (wagen[t.wagen] ??= { geraete: 0, ausgeliehen: 0, ueberfaellig: 0, gesperrt: 0 });
+    w.geraete++;
+    if (z.faellig_am !== null) {
+      w.ausgeliehen++;
+      if (z.faellig_am < jetzt) w.ueberfaellig++;
+    } else if (z.status !== "verfuegbar") w.gesperrt++;
+  }
+  return Object.entries(wagen)
+    .map(([nr, w]) => ({ wagen: Number(nr), ...w }))
+    .sort((a, b) => a.wagen - b.wagen);
+}
+
+/** Sammel-Rückbuchen: alle noch offenen Ausleihen eines Wagens als „Alles in Ordnung“ zurückbuchen. */
+export async function wagenZurueckbuchen(db: D1Database, wagen: number, lehrkraft: Konto) {
+  const r = await db
+    .prepare(
+      `UPDATE ausleihen SET zurueckgegeben_am = ?, zurueckgebucht_von = ?, zustand = 'ok'
+       WHERE zurueckgegeben_am IS NULL
+         AND geraet_id IN (SELECT id FROM geraete WHERE inventarnummer GLOB ?)`,
+    )
+    .bind(Date.now(), lehrkraft.id, `${wagenKennung(wagen)}-[0-9]*`)
+    .run();
+  return r.meta.changes ?? 0;
+}
+
+/** Suche nach Gerät oder Kürzel (Teil des Namens genügt, Groß-/Kleinschreibung egal). */
+export async function suchen(db: D1Database, begriff: string) {
+  const q = begriff.trim().slice(0, 40);
+  if (!q) return { geraete: [] as Geraet[], schueler: [] as Konto[] };
+  const [g, s] = await db.batch([
+    db.prepare("SELECT * FROM geraete WHERE instr(upper(inventarnummer), upper(?)) > 0 OR instr(lower(seriennummer), lower(?)) > 0 LIMIT 50").bind(q, q),
+    db.prepare("SELECT * FROM konten WHERE rolle = 'schueler' AND instr(lower(kuerzel), lower(?)) > 0 ORDER BY kuerzel LIMIT 50").bind(q),
+  ]);
+  return {
+    geraete: (g.results as Geraet[]).sort((a, b) => natuerlich(a.inventarnummer, b.inventarnummer)),
+    schueler: s.results as Konto[],
+  };
+}
+
 /** Löscht ein Gerät, das noch nie ausgeliehen wurde (z. B. versehentlich angelegt). */
 export async function geraetLoeschen(db: D1Database, geraet: Geraet) {
   const verlauf = await db.prepare("SELECT 1 FROM ausleihen WHERE geraet_id = ? LIMIT 1").bind(geraet.id).first();
@@ -421,8 +502,8 @@ export function importZeilenLesen(text: string, standardKlasse: string) {
       fehler.push(`Zeile ${i + 1}: „${teile[0]}“ ist kein gültiges Kürzel.`);
       return;
     }
-    if (gesehen.has(kuerzel)) return;
-    gesehen.add(kuerzel);
+    if (gesehen.has(kuerzelSchluessel(kuerzel))) return;
+    gesehen.add(kuerzelSchluessel(kuerzel));
     eintraege.push({ kuerzel, klasse });
   });
   return { eintraege, fehler };

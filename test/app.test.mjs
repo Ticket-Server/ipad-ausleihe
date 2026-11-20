@@ -163,7 +163,7 @@ test("Lehrkraft-Aktionen nur für Lehrkräfte, Schüler kann sich nicht als Lehr
 test("Lehrkraft gibt ohne PIN aus und sieht das Kürzel", async () => {
   let r = await lehrkraft.senden("/g/W02-03", { aktion: "lk_ausgeben", kuerzel: "joka2" });
   assert.match(r.text, /W02-03 an joka2 ausgegeben/);
-  assert.match(r.text, /durch admin/);
+  assert.match(r.text, /durch Admin/);
   r = await lehrkraft.senden("/g/W02-03", { aktion: "lk_zurueckbuchen", zustand: "ok", weiter: "uebersicht" });
   assert.match(r.text, /W02-03 ist zurückgebucht/);
 });
@@ -176,7 +176,7 @@ test("Formulare von fremden Seiten werden abgelehnt (CSRF)", async () => {
 test("Import erzeugt PINs mit Kärtchen und Excel-Liste, abrufbar bis „Fertig“", async () => {
   let r = await lehrkraft.senden("/lehrkraft/schueler/import", { zeilen: "abcd1;7b\nEfgh2\nmamu7\n\nabcd1", klasse: "7a" });
   assert.match(r.text, /abcd1/);
-  assert.match(r.text, /efgh2/);
+  assert.match(r.text, /Efgh2/, "Schreibweise aus der Liste bleibt erhalten");
   const pin = r.text.match(/<td class="pin">(\d{4})<\/td>/)?.[1];
   assert.ok(pin, "PIN wird angezeigt");
   r = await lehrkraft.get("/lehrkraft/zugaenge");
@@ -192,7 +192,7 @@ test("Import erzeugt PINs mit Kärtchen und Excel-Liste, abrufbar bis „Fertig�
   assert.equal((await lehrkraft.get("/lehrkraft/zugaenge")).ort, "/lehrkraft/schueler");
   assert.equal((await lehrkraft.get("/lehrkraft/zugaenge/liste.csv")).ort, "/lehrkraft/schueler");
   r = await lehrkraft.get("/lehrkraft/schueler?klasse=7a");
-  assert.match(r.text, /efgh2/);
+  assert.match(r.text, /Efgh2/);
   assert.doesNotMatch(r.text, /abcd1/);
   r = await new Browser().senden("/g/W02-04", { aktion: "ausleihen", kuerzel: "abcd1", pin });
   assert.match(r.text, /ist jetzt auf abcd1 ausgeliehen/);
@@ -332,4 +332,77 @@ test("Neue PINs für eine ganze Klasse, alte PINs gelten nicht mehr", async () =
   assert.match(r.text, /ist jetzt auf kl2 ausgeliehen/);
   r = await new Browser().senden("/g/W02-06", { aktion: "zurueckgeben", kuerzel: "kl2", pin, zustand: "ok" });
   assert.match(r.text, /zurückgegeben/);
+});
+
+test("Kürzel wie aus der Schulverwaltung: Schreibweise bleibt, Eingabe ohne Groß-/Kleinschreibung", async () => {
+  let r = await lehrkraft.senden("/lehrkraft/schueler/import", { zeilen: "MusterM;10a\nMüllerA;10a\nmusterm;10a", klasse: "" });
+  assert.match(r.text, /Neue PINs \(2\)/, "musterm ist dasselbe Kürzel wie MusterM");
+  const pin = r.text.match(/<td><strong>MusterM<\/strong><\/td><td>10a<\/td><td class="pin">(\d{4})<\/td>/)?.[1];
+  assert.ok(pin, "MusterM steht so in der Liste");
+  assert.match(r.text, /MüllerA/);
+  r = await lehrkraft.get("/lehrkraft/zugaenge/kaertchen");
+  assert.match(r.text, />MusterM</);
+  await lehrkraft.senden("/lehrkraft/zugaenge/fertig", {});
+
+  r = await new Browser().senden("/g/W02-07", { aktion: "ausleihen", kuerzel: "musterm", pin });
+  assert.match(r.text, /W02-07 ist jetzt auf MusterM ausgeliehen/);
+  r = await new Browser().senden("/g/W02-07", { aktion: "zurueckgeben", kuerzel: "MUSTERM", pin, zustand: "ok" });
+  assert.match(r.text, /zurückgegeben/);
+
+  r = await lehrkraft.post("/lehrkraft/schueler/neu", { kuerzel: "MUSTERM", klasse: "" });
+  assert.match(r.text, /schon vergeben/);
+  r = await lehrkraft.get("/lehrkraft/schueler?q=muster");
+  assert.match(r.text, /MusterM/);
+  assert.equal((await lehrkraft.get("/lehrkraft/schueler/" + encodeURIComponent("MüllerA"))).status, 200);
+  r = await lehrkraft.post("/lehrkraft/schueler/import", { zeilen: "Max Muster" });
+  assert.match(r.text, /kein gültiges Kürzel/);
+});
+
+test("Wagen-Kontrolle zeigt, was fehlt, und bucht alle offenen auf einmal zurück", async () => {
+  await lehrkraft.senden("/lehrkraft/geraete/wagen", { wagen: "7", anzahl: "6" });
+  let r =await lehrkraft.senden("/lehrkraft/schueler/import", { zeilen: "WagenA;8b\nWagenB;8b", klasse: "" });
+  const pinA = r.text.match(/<td><strong>WagenA<\/strong><\/td><td>8b<\/td><td class="pin">(\d{4})<\/td>/)[1];
+  const pinB = r.text.match(/<td><strong>WagenB<\/strong><\/td><td>8b<\/td><td class="pin">(\d{4})<\/td>/)[1];
+  await lehrkraft.senden("/lehrkraft/zugaenge/fertig", {});
+  await new Browser().senden("/g/W07-02", { aktion: "ausleihen", kuerzel: "WagenA", pin: pinA });
+  await new Browser().senden("/g/W07-05", { aktion: "ausleihen", kuerzel: "WagenB", pin: pinB });
+
+  r = await lehrkraft.get("/lehrkraft/wagen");
+  assert.match(r.text, /Wagen 7/);
+  assert.match(r.text, /4 \/ 6/);
+  r = await lehrkraft.get("/lehrkraft/wagen/7");
+  assert.match(r.text, /4 von 6 iPads im Wagen/);
+  assert.equal((r.text.match(/class="kachel aus"/g) || []).length, 2);
+  assert.match(r.text, />WagenA</);
+  assert.match(r.text, /2 iPads von Wagen 7 zurückbuchen/);
+
+  r = await lehrkraft.senden("/lehrkraft/wagen/7/zurueckbuchen", {});
+  assert.match(r.text, /Wagen 7: 2 iPads zurückgebucht/);
+  assert.match(r.text, /Alle iPads zurückgebucht/);
+  r = await lehrkraft.get("/g/W07-02");
+  assert.match(r.text, /durch Admin/);
+  r = await lehrkraft.senden("/lehrkraft/wagen/7/zurueckbuchen", {});
+  assert.match(r.text, /Es war nichts mehr offen/);
+  assert.equal((await lehrkraft.get("/lehrkraft/wagen/42")).status, 404);
+  assert.equal((await new Browser().get("/lehrkraft/wagen/7")).status, 302, "nur für Lehrkräfte");
+  assert.equal((await new Browser().post("/lehrkraft/wagen/7/zurueckbuchen", {})).status, 403);
+});
+
+test("Suche findet Kürzel und Geräte und springt bei eindeutigem Treffer direkt hin", async () => {
+  let r = await lehrkraft.get("/lehrkraft/suche?q=w07-03");
+  assert.equal(r.ort, "/g/W07-03");
+  r = await lehrkraft.get("/lehrkraft/suche?q=wagena");
+  assert.equal(r.ort, "/lehrkraft/schueler/WagenA");
+  r = await lehrkraft.get("/lehrkraft/suche?q=Wagen");
+  assert.equal(r.status, 200);
+  assert.match(r.text, />WagenA</);
+  assert.match(r.text, />WagenB</);
+  r = await lehrkraft.get("/lehrkraft/suche?q=W07");
+  assert.match(r.text, /W07-01/);
+  assert.match(r.text, /W07-06/);
+  r = await lehrkraft.get("/lehrkraft/suche?q=gibtsnicht");
+  assert.match(r.text, /Nichts gefunden/);
+  r = await lehrkraft.get("/lehrkraft");
+  assert.match(r.text, /action="\/lehrkraft\/suche"/);
+  assert.doesNotMatch((await new Browser().get("/")).text, /lehrkraft\/suche/, "Suche nur für Lehrkräfte sichtbar");
 });
