@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ipad-ausleihe",
+  "main": "src/index.tsx",
+  "compatibility_date": "2025-10-01",
+  "assets": { "directory": "./public" },
+  "observability": { "enabled": true },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ipad-ausleihe",
+      // Nach dem Anlegen der D1-Datenbank hier deren ID eintragen (siehe README).
+      "database_id": "HIER-DATENBANK-ID-EINTRAGEN"
+    }
+  ],
+  // Täglich um 03:17 UTC: alte Ausleihen und abgelaufene Sitzungen löschen.
+  "triggers": { "crons": ["17 3 * * *"] },
+  "vars": {
+    // Rückgabe bis Ende des Schultags (Uhrzeit in Deutschland).
+    "RUECKGABE_UHRZEIT": "16:00",
+    // Wie viele Geräte ein Schüler gleichzeitig ausleihen darf.
+    "MAX_PRO_SCHUELER": "1",
+    // Länge der automatisch erzeugten Schüler-PIN.
+    "PIN_LAENGE": "4",
+    // Löschfrist für abgeschlossene Ausleihen in Tagen (offene Schäden bleiben).
+    "AUFBEWAHRUNG_TAGE": "90",
+    // "1" zeigt Schul-Admins einen Knopf zum Laden von Demo-Daten. Im Echtbetrieb "0".
+    "DEMO": "0"
+  }
+}
