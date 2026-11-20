@@ -33,7 +33,8 @@ Danach bleibt niemand angemeldet. Der Nächste am Gerät kann also nicht im Name
   Erneut aufgerufen, werden weitere Geräte hinten angehängt. Filter nach Wagen, **QR-Etiketten pro Wagen drucken** (passend für den Etikettenbogen der Schule: A4 quer, 8 × 4 Etiketten à 33,8 × 48,3 mm; angebrochene Bögen und Feinjustierung in mm möglich),
   Status ändern (verfügbar / defekt / außer Betrieb). Versehentlich angelegte Geräte lassen sich löschen,
   solange sie noch nie ausgeliehen wurden.
-- **Schüler:** einzeln anlegen oder **Liste importieren** (Kürzel aus der Schulverwaltung, eines pro Zeile,
+- **Schüler:** einzeln anlegen oder **Liste importieren** (Kürzel aus der Schulverwaltung wie `MusterM`, eines pro Zeile;
+  die Schreibweise bleibt erhalten, beim Eingeben spielt Groß-/Kleinschreibung keine Rolle;
   optional `;Klasse`). PINs werden automatisch erzeugt. Direkt danach: **Kärtchen drucken** (Scheckkartenformat,
   10 pro A4-Blatt, in den Schulfarben) und **Liste herunterladen** (Excel/CSV). Die PINs werden nur verschlüsselt
   gespeichert und sind später nicht mehr lesbar. Die Seite bleibt deshalb bis „Fertig“ abrufbar, höchstens 60 Minuten.
